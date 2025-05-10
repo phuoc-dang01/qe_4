@@ -147,6 +147,7 @@ class ABTestingPopulation(neat.Population):
                     self.reporters.found_solution(self.config, self.generation, best)
                     break
 
+            pdb.set_trace()
             # Create the next generation from the current generation.
             self.population = self.reproduction.reproduce(self.config, self.species,
                                                           self.config.pop_size, self.generation)

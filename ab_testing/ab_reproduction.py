@@ -222,44 +222,79 @@ class ABTestingReproduction(neat.DefaultReproduction):
         """Randomly assign a genome to either 'rl' or 'standard' group based on ab_ratio."""
         return 'rl' if random.random() < self.ab_ratio else 'standard'
 
-    def _apply_rl_mutation(self, genome, config):
-        """Apply mutation using the RL policy and NeatMutationEnv step, with debug prints."""
-        # Sanity check
+
+    def _apply_rl_mutation(self, genome, _genome_config):
         print(f"[RL_MUTATE] Genome: {genome.key}")
 
-        # If no policy loaded, fallback
-        if self.rl_policy is None:
-            print("[RL_MUTATE] No policy loaded, using random mutation.")
-            return self._apply_random_mutation(genome, config)
+        # 1) Reset all the Gym wrappers (this also calls NeatMutationEnv.reset → _reset_bookkeeping)
+        obs = self.eval_env.reset()
 
-        # 1. Extract features and call policy
-        obs = self._get_observation(genome)
-        if not isinstance(obs, torch.Tensor):
-            obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-        else:
-            obs_t = obs.unsqueeze(0) if obs.dim() == 1 else obs
+        # 2) Drill down to the raw NeatMutationEnv
+        inner_vec = getattr(self.eval_env, 'venv', self.eval_env)
+        wrapped = inner_vec.envs[0]
+        base_env = wrapped.unwrapped
 
-        with torch.no_grad():
-            actions, _, _ = self.rl_policy.forward(obs_t, deterministic=False)
+        # 3) Inject your genome and compute its initial fitness
+        base_env.genome = genome
+        base_env.prev_fitness = base_env._evaluate_genome()
 
-        # 2. Unpack and print for sanity
-        primary = int(actions[0][0]) if actions.ndim > 1 else int(actions[0])
-        secondary = int(actions[0][1]) if actions.ndim > 1 else int(actions[1])
-        print(f"[RL_MUTATE] Policy actions -> primary: {primary}, secondary: {secondary}")
+        # 4) Now do N RL steps
+        for step in range(5):
+            actions, _ = self.rl_model.predict(obs, deterministic=True)
+            print(f"[RL_MUTATE] Step {step+1}: action={actions[0]}")
+            obs, rewards, dones, infos = self.eval_env.step(actions)
+            print(f"    reward={rewards[0]:.4f}, done={dones[0]}")
+            if dones[0]:
+                break
 
-        # 3. Apply action via NeatMutationEnv
-        env = NeatMutationEnv(config)
-        # seed the env's genome to our current one
-        env._reset_bookkeeping()
-        env.genome = genome
-        new_obs, reward, terminated, truncated, info = env.step((primary, secondary))
+        # 5) Return the mutated genome
+        return base_env.genome
 
-        print(f"[RL_MUTATE] Applied via env.step, reward: {reward:.4f}, "
-              f"terminated: {terminated}, info: {info}")
 
-        # Retrieve mutated genome
-        mutated = env.genome
-        return mutated
+    # def _apply_rl_mutation(self, genome, config):
+    #     pdb.set_trace()
+    #     """Apply mutation using the RL policy and NeatMutationEnv step, with debug prints."""
+    #     # Sanity check
+    #     print(f"[RL_MUTATE] Genome: {genome.key}")
+
+    #     # If no policy loaded, fallback
+    #     if self.rl_policy is None:
+    #         print("[RL_MUTATE] No policy loaded, using random mutation.")
+    #         return self._apply_random_mutation(genome, config)
+
+    #     # 1. Extract features and call policy
+    #     obs = self._get_observation(genome)
+    #     if not isinstance(obs, torch.Tensor):
+    #         obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+    #     else:
+    #         obs_t = obs.unsqueeze(0) if obs.dim() == 1 else obs
+
+    #     pdb.set_trace()
+    #     with torch.no_grad():
+    #         actions_t, _, _ = self.rl_policy.forward(obs_t, deterministic=False)
+
+    #     actions = actions_t.cpu().numpy()
+
+    #     # Unpack the actions
+    #     primary, secondary = actions[0]
+    #     # 2. Unpack and print for sanity
+    #     # primary = int(actions[0][0]) if actions.ndim > 1 else int(actions[0])
+    #     # secondary = int(actions[0][1]) if actions.ndim > 1 else int(actions[1])
+    #     print(f"[RL_MUTATE] Policy actions -> primary: {primary}, secondary: {secondary}")
+
+    #     # 3. Apply action via NeatMutationEnv
+    #     env = NeatMutationEnv(config)
+    #     # seed the env's genome to our current one
+    #     env._reset_bookkeeping()
+    #     env.genome = genome
+    #     new_obs, reward, terminated, truncated, info = env.step((primary, secondary))
+
+    #     print(f"[RL_MUTATE] Applied via env.step, reward: {reward:.4f}, "
+    #           f"terminated: {terminated}, info: {info}")
+
+    #     # Retrieve mutated genome
+    #     mutated = env.genome
+    #     return mutated
 
     def _get_observation(self, genome):
         """Extract features from the genome to feed into RL policy."""
