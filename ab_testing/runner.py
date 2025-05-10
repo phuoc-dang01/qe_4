@@ -1,0 +1,65 @@
+import os
+from typing import Any
+
+import numpy as np
+import torch
+from ab_testing.ab_population import ABTestingPopulation
+from ab_testing.evaluator import GenomeEvaluator
+
+
+def run_ab_testing_experiment(args: Any) -> Any:
+    """Main entry point for A/B testing experiment."""
+    import neat
+    config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        args.config,
+    )
+
+    # Set extra info for experiment
+    structure_shape = args.structure_shape
+    save_path = os.path.join("saved_data", args.exp_name + "_ab_testing")
+    os.makedirs(save_path, exist_ok=True)
+
+    config.extra_info = {
+        "structure_shape": structure_shape,
+        "save_path": save_path,
+        "env_name": args.env_name,
+        "structure_hashes": {},
+        "args": args,
+    }
+
+    # Save experiment metadata
+    metadata_path = os.path.join(save_path, "metadata.txt")
+    with open(metadata_path, "w") as f:
+        f.write(f"ENV: {args.env_name}\n")
+        f.write(f"STRUCTURE: {structure_shape}\n")
+        f.write(f"POP_SIZE: {args.pop_size}\n")
+        f.write(f"AB_RATIO: {args.ab_ratio}\n")
+        f.write(f"RL_POLICY_PATH: {args.rl_policy_path}\n")
+
+    # Init population
+    pop = ABTestingPopulation(
+        config=config,
+        rl_policy_path=args.rl_policy_path,
+        ab_ratio=args.ab_ratio,
+    )
+
+    max_evaluations = args.max_evaluations
+    generations = int(np.ceil(max_evaluations / args.pop_size))
+
+    print(f"[INIT] Starting A/B test: {args.exp_name}, {generations} generations")
+
+    # Use NEAT's internal run method with constraints
+    best_genome = pop.run(
+        GenomeEvaluator.batch_eval_fitness,
+        GenomeEvaluator.batch_eval_constraint,
+        n=generations
+    )
+
+    # Final report
+    pop.ab_reporter._generate_report(pop.generation - 1)
+    print(f"[COMPLETE] Best genome: {best_genome.key}, Fitness: {best_genome.fitness:.4f}")
+    return best_genome
