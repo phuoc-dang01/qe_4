@@ -261,41 +261,11 @@ class ABTestingReproduction(neat.DefaultReproduction):
         mutated = env.genome
         return mutated
 
-
     def _get_observation(self, genome):
         """Extract features from the genome to feed into RL policy."""
         # Same feature extraction as used in the training environment
-        features = []
-
-        # 1. Network structure features
-        num_nodes = len(genome.nodes)
-        num_connections = len(genome.connections)
-        features.extend([num_nodes, num_connections])
-
-        # 2. Connectivity features
-        if num_connections > 0:
-            enabled_connections = sum(
-                1 for conn in genome.connections.values() if conn.enabled
-            )
-            avg_weight = np.mean([conn.weight for conn in genome.connections.values()])
-            features.extend([enabled_connections / num_connections, avg_weight])
-        else:
-            features.extend([0, 0])
-
-        # 3. Node activation distribution
-        activation_counts = {af: 0 for af in self.activation_functions}
-        for node in genome.nodes.values():
-            if hasattr(node, "activation") and node.activation in activation_counts:
-                activation_counts[node.activation] += 1
-
-        activation_distribution = [
-            activation_counts[af] / max(1, num_nodes)
-            for af in self.activation_functions
-        ]
-        features.extend(activation_distribution)
-
-        # 4. Recent fitness history (placeholder)
-        features.extend([0, 0, 0, 0])  # In a real implementation, track fitness history
-
-        return np.array(features, dtype=np.float32)
+        env = NeatMutationEnv(self.parent_population.config)
+        env._reset_bookkeeping()
+        env.genome = genome
+        return env._get_observation()
 

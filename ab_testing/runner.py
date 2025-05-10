@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -16,11 +17,14 @@ def run_ab_testing_experiment(args: Any) -> Any:
         neat.DefaultSpeciesSet,
         neat.DefaultStagnation,
         args.config,
+        custom_config=[('NEAT','pop_size', args.pop_size)]
     )
 
     # Set extra info for experiment
     structure_shape = args.structure_shape
-    save_path = os.path.join("saved_data", args.exp_name + "_ab_testing")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    save_path = os.path.join("saved_data",  f"{args.exp_name}_{timestamp}")
+    print(save_path)
     os.makedirs(save_path, exist_ok=True)
 
     config.extra_info = {

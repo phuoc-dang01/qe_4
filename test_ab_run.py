@@ -44,7 +44,7 @@ def create_parser():
 
     # Standard experiment arguments
     parser.add_argument(
-        "--exp_name", type=str, default="cppn_neat_ab_testing",
+        "--exp_name", type=str, default="rl_ab_testing",
         help="Experiment name (used for saving data)"
     )
     parser.add_argument(
