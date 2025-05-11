@@ -10,7 +10,11 @@ from ab_testing.robot_gen import CPPNRobotGenerator
 
 from evogym import get_full_connectivity, has_actuator, hashable, is_connected
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# Get the project root (3 levels up from current file)
+current_file = Path(__file__).resolve()
+PROJECT_ROOT = current_file.parent.parent.parent
+
+# Add paths to sys.path
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))

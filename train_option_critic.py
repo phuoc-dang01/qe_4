@@ -1,6 +1,7 @@
 import argparse
 import multiprocessing
 import os
+import pdb
 import sys
 from pathlib import Path
 
@@ -132,6 +133,8 @@ def train_option_critic(args):
 
     log_dir = os.path.join(args.save_dir, 'logs')
     os.makedirs(log_dir, exist_ok=True)
+
+
     env_fn = lambda: Monitor(NeatMutationEnv(neat_config), os.path.join(log_dir, 'train'))
     train_env = make_vec_env(env_fn, args.n_envs)
     train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True, clip_reward=RewardConst.CLIP_REWARD)
@@ -165,17 +168,17 @@ def train_option_critic(args):
 def init_train_args():
     """Initialize the argument parser."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_envs', type=int, default=14)
-    parser.add_argument('--total_timesteps', type=int, default=100)
+    parser.add_argument('--n_envs', type=int, default=22)
+    parser.add_argument('--total_timesteps', type=int, default=10000)
 
-    parser.add_argument('--n_steps', type=int, default=32)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--n_epochs', type=int, default=2)
+    parser.add_argument('--n_steps', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--n_epochs', type=int, default=4)
 
-    parser.add_argument('--eval_interval', type=int, default=50)
-    parser.add_argument('--n_eval_episodes', type=int, default=3)
+    parser.add_argument('--eval_interval', type=int, default=2000)
+    parser.add_argument('--n_eval_episodes', type=int, default=5)
 
-    parser.add_argument('--save_interval', type=int, default=50)
+    parser.add_argument('--save_interval', type=int, default=2000)
 
     parser.add_argument('--num_options', type=int, default=6)
     parser.add_argument('--termination_reg', type=float, default=0.005)
