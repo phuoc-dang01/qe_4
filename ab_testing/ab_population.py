@@ -1,5 +1,6 @@
 # ab_testing/ab_population.py
 import pdb
+import random
 
 import neat
 import numpy as np
@@ -32,15 +33,23 @@ class ABTestingPopulation(neat.Population):
         self.save_reporter = SaveResultReporter(config.extra_info['save_path'])
         self.add_reporter(self.save_reporter)
 
-        # Initialize tracking - assign groups to initial population
-        for genome_id, genome in self.population.items():
+        for genome_id in self.population:
             self.reproduction.genome_group[genome_id] = self.reproduction._assign_random_group()
 
+
+
     def _update_group_stats(self, generation, population):
+        # ── ENSURE EVERY GENOME IS TAGGED ──
+        for g in population.values():
+            self.reproduction.genome_group.setdefault(
+                g.key,
+                self.reproduction._assign_random_group()
+            )
+
         """Update statistics for each group (rl vs standard), computing (min, mean, max) for fitness and complexity."""
         # split into two lists
-        rl_group = [g for g in population.values() if self.reproduction.genome_group[g.key] == 'rl']
-        std_group = [g for g in population.values() if self.reproduction.genome_group[g.key] == 'standard']
+        rl_group = [g for g in population.values() if self.reproduction.genome_group.get(g.key) == 'rl']
+        std_group = [g for g in population.values() if self.reproduction.genome_group.get(g.key) == 'standard']
 
         def compute_stats(values):
             if not values:
@@ -48,32 +57,17 @@ class ABTestingPopulation(neat.Population):
             arr = np.array(values, dtype=float)
             return (float(arr.min()), float(arr.mean()), float(arr.max()))
 
-        # fitness stats
-        rl_f_stats = compute_stats([g.fitness for g in rl_group])
-        std_f_stats = compute_stats([g.fitness for g in std_group])
-
-        # complexity stats: here we define complexity as total genes (nodes + connections);
-        # replace with whatever measure you track
-        rl_c_stats = compute_stats([
-            len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', []))
-            for g in rl_group
-        ])
-        std_c_stats = compute_stats([
-            len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', []))
-            for g in std_group
-        ])
-
-        # push through to reporter in the expected shape
-        self.ab_reporter.update_stats(generation, {
+        stats_update = {
             'rl': {
-                'fitness':    rl_f_stats,
-                'complexity': rl_c_stats,
+                'fitness': compute_stats([g.fitness for g in rl_group if g.fitness is not None and np.isfinite(g.fitness)]),
+                'complexity': compute_stats([len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', [])) for g in rl_group])
             },
             'standard': {
-                'fitness':    std_f_stats,
-                'complexity': std_c_stats,
+                'fitness': compute_stats([g.fitness for g in std_group if g.fitness is not None and np.isfinite(g.fitness)]),
+                'complexity': compute_stats([len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', [])) for g in std_group])
             }
-        })
+        }
+        return stats_update
 
     def run(self, fitness_function, constraint_function=None, n=None):
         """
@@ -125,6 +119,7 @@ class ABTestingPopulation(neat.Population):
 
             # Evaluate all genomes using the user-provided function.
             fitness_function(list(self.population.items()), self.config, self.generation)
+            # self._update_group_stats(self.generation, self.population)
 
             # Gather and report statistics.
             best = None
@@ -147,10 +142,19 @@ class ABTestingPopulation(neat.Population):
                     self.reporters.found_solution(self.config, self.generation, best)
                     break
 
-            pdb.set_trace()
             # Create the next generation from the current generation.
             self.population = self.reproduction.reproduce(self.config, self.species,
                                                           self.config.pop_size, self.generation)
+
+            all_ids = list(self.population.keys())
+            pop_n   = len(all_ids)
+            # Guarantee at least one genome in each arm
+            num_rl  = max(1, min(pop_n-1, int(self.reproduction.ab_ratio * pop_n)))
+            rl_ids  = set(random.sample(all_ids, num_rl))
+
+            for gid in all_ids:
+                group = 'rl' if gid in rl_ids else 'standard'
+                self.reproduction.genome_group[gid] = group
 
             # Check for complete extinction.
             if not self.species.species:
@@ -169,7 +173,6 @@ class ABTestingPopulation(neat.Population):
             self.species.speciate(self.config, self.population, self.generation)
 
             self.reporters.end_generation(self.config, self.population, self.species)
-
             self.generation += 1
 
         if self.config.no_fitness_termination:

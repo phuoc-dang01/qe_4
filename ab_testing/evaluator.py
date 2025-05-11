@@ -24,8 +24,12 @@ class GenomeEvaluator:
         # Check for duplicates and cache
         robot_hash = hashable(robot)
         if robot_hash in config.extra_info["structure_hashes"]:
-            print(f"   [SKIP] Duplicate structure (genome {genome_id})")
-            return -float("inf")
+            # Re-use the original fitness
+            prev_fitness = config.extra_info["structure_hashes"][robot_hash]
+            print(f"   [SKIP] Duplicate structure (genome {genome_id}), reusing fitness {prev_fitness:.5f}")
+            genome.fitness = prev_fitness
+            return prev_fitness
+
 
         config.extra_info["structure_hashes"][robot_hash] = True
         args = config.extra_info["args"]
@@ -45,6 +49,8 @@ class GenomeEvaluator:
             str(genome_id),
             connectivity
         )
+        genome.fitness = fitness
+        config.extra_info["structure_hashes"][robot_hash] = fitness
         return fitness
 
     @staticmethod

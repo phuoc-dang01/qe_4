@@ -81,6 +81,14 @@ class ABTestingReproduction(neat.DefaultReproduction):
         args = init_train_args()
         return load_option_critic_model(policy_path, args)
 
+    def create_new(self, genome_type, genome_config, pop_size):
+        """When NEAT wants a brand-new population (e.g., after extinction/constraints)."""
+        new_pop = super().create_new(genome_type, genome_config, pop_size)
+        # Tag every genome at first sight
+        for gid in new_pop:
+            self.genome_group[gid] = self._assign_random_group()
+        return new_pop
+
     def reproduce(self, config, species, pop_size, generation):
         """
         Reproduce using either RL-guided or standard mutations based on A/B testing.
@@ -106,6 +114,15 @@ class ABTestingReproduction(neat.DefaultReproduction):
                 species_fitness.extend(m.fitness for m in stag_s.members.values())
                 remaining_species.append(stag_s)
 
+        # ─── Gen-0 baseline ───
+        if generation == 0:
+            # overall average fitness across all individuals
+            avg_fit = float(np.mean(species_fitness))
+            baseline = (avg_fit, avg_fit, avg_fit)
+            # record the same starting point for both arms
+            # self.stats['rl']['fitness'].append(baseline)
+            # self.stats['standard']['fitness'].append(baseline)
+
         if not remaining_species:
             species.species = {}
             return {}
@@ -113,11 +130,19 @@ class ABTestingReproduction(neat.DefaultReproduction):
         # Calculate adjusted fitness
         min_fitness = min(species_fitness)
         max_fitness = max(species_fitness)
+
+        fitness_diff = max_fitness - min_fitness
+        eps = 1e-8
+        if not np.isfinite(fitness_diff) or fitness_diff < eps:
+            fitness_range = eps
+        else:
+            fitness_range = fitness_diff
+
         fitness_range = max(1.0, max_fitness - min_fitness)
 
         for s in remaining_species:
-            mean_species_fitness = sum(m.fitness for m in s.members.values()) / len(s.members)
-            s.adjusted_fitness = (mean_species_fitness - min_fitness) / fitness_range
+            mean_fit = sum(m.fitness for m in s.members.values()) / len(s.members)
+            s.adjusted_fitness = (mean_fit - min_fitness) / fitness_range
 
         adjusted_fitnesses = [s.adjusted_fitness for s in remaining_species]
         avg_adjusted_fitness = sum(adjusted_fitnesses) / len(adjusted_fitnesses)
@@ -155,6 +180,8 @@ class ABTestingReproduction(neat.DefaultReproduction):
             if self.reproduction_config.elitism > 0:
                 for i, m in old_members[:self.reproduction_config.elitism]:
                     new_population[i] = m
+                    self.genome_group.setdefault(i,self._assign_random_group())
+
                     spawn -= 1
 
                     # Keep track of the group assignment
@@ -184,15 +211,13 @@ class ABTestingReproduction(neat.DefaultReproduction):
                 child.configure_crossover(parent1, parent2, config.genome_config)
 
                 # Determine which group this child belongs to
-                parent1_group = self.genome_group.get(parent1_id, self._assign_random_group())
-                parent2_group = self.genome_group.get(parent2_id, self._assign_random_group())
-
-                # If both parents are from the same group, child inherits that group
-                # Otherwise, randomly assign based on the A/B ratio
-                if parent1_group == parent2_group:
-                    child_group = parent1_group
+                p1g = self.genome_group.get(parent1_id, self._assign_random_group())
+                p2g = self.genome_group.get(parent2_id, self._assign_random_group())
+                if p1g == p2g:
+                    child_group = p1g
                 else:
                     child_group = self._assign_random_group()
+                self.genome_group[gid] = child_group
 
                 # Apply mutations based on group
                 if child_group == 'rl':
@@ -201,7 +226,6 @@ class ABTestingReproduction(neat.DefaultReproduction):
                     child.mutate(config.genome_config)
 
                 # Record group assignment and ancestry
-                self.genome_group[gid] = child_group
                 self.ancestors[gid] = (parent1_id, parent2_id)
 
                 # Add to new population
@@ -213,15 +237,14 @@ class ABTestingReproduction(neat.DefaultReproduction):
 
         self.logger.info(f"Reproduction complete. New population size: {len(new_population)}")
 
-        if self.tracking_enabled and self.parent_population is not None:
-            self.parent_population._update_group_stats(generation,
-                                                    new_population)
+        # # Only collect group‐specific stats from gen 1 onward
+        # if generation > 0 and self.tracking_enabled and self.parent_population is not None:
+        #     self.parent_population._update_group_stats(generation, new_population)
         return new_population
 
     def _assign_random_group(self):
         """Randomly assign a genome to either 'rl' or 'standard' group based on ab_ratio."""
         return 'rl' if random.random() < self.ab_ratio else 'standard'
-
 
     def _apply_rl_mutation(self, genome, _genome_config):
         print(f"[RL_MUTATE] Genome: {genome.key}")
@@ -249,52 +272,6 @@ class ABTestingReproduction(neat.DefaultReproduction):
 
         # 5) Return the mutated genome
         return base_env.genome
-
-
-    # def _apply_rl_mutation(self, genome, config):
-    #     pdb.set_trace()
-    #     """Apply mutation using the RL policy and NeatMutationEnv step, with debug prints."""
-    #     # Sanity check
-    #     print(f"[RL_MUTATE] Genome: {genome.key}")
-
-    #     # If no policy loaded, fallback
-    #     if self.rl_policy is None:
-    #         print("[RL_MUTATE] No policy loaded, using random mutation.")
-    #         return self._apply_random_mutation(genome, config)
-
-    #     # 1. Extract features and call policy
-    #     obs = self._get_observation(genome)
-    #     if not isinstance(obs, torch.Tensor):
-    #         obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-    #     else:
-    #         obs_t = obs.unsqueeze(0) if obs.dim() == 1 else obs
-
-    #     pdb.set_trace()
-    #     with torch.no_grad():
-    #         actions_t, _, _ = self.rl_policy.forward(obs_t, deterministic=False)
-
-    #     actions = actions_t.cpu().numpy()
-
-    #     # Unpack the actions
-    #     primary, secondary = actions[0]
-    #     # 2. Unpack and print for sanity
-    #     # primary = int(actions[0][0]) if actions.ndim > 1 else int(actions[0])
-    #     # secondary = int(actions[0][1]) if actions.ndim > 1 else int(actions[1])
-    #     print(f"[RL_MUTATE] Policy actions -> primary: {primary}, secondary: {secondary}")
-
-    #     # 3. Apply action via NeatMutationEnv
-    #     env = NeatMutationEnv(config)
-    #     # seed the env's genome to our current one
-    #     env._reset_bookkeeping()
-    #     env.genome = genome
-    #     new_obs, reward, terminated, truncated, info = env.step((primary, secondary))
-
-    #     print(f"[RL_MUTATE] Applied via env.step, reward: {reward:.4f}, "
-    #           f"terminated: {terminated}, info: {info}")
-
-    #     # Retrieve mutated genome
-    #     mutated = env.genome
-    #     return mutated
 
     def _get_observation(self, genome):
         """Extract features from the genome to feed into RL policy."""

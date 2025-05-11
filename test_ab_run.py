@@ -6,6 +6,11 @@ import sys
 import matplotlib
 
 matplotlib.use('Agg')
+import argparse
+import random
+
+import numpy as np
+import torch
 
 sys.path.append('/home/pd468/qe/evogym/examples/')
 sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
@@ -64,7 +69,7 @@ def create_parser():
         help="Robot structure shape (height,width)"
     )
     parser.add_argument(
-        "--max_evaluations", type=int, default=6,
+        "--max_evaluations", type=int, default=12,
         help="Maximum total genome evaluations"
     )
     parser.add_argument(
@@ -79,6 +84,7 @@ def create_parser():
         "--eval_interval", type=int, default=500,
         help="Interval for evaluating the policy during training"
     )
+    parser.add_argument("--seed", type=int, default=42, help="Master seed for reproducibility")
 
     # Include PPO and A/B testing args
     add_ppo_args(parser)
@@ -88,4 +94,8 @@ def create_parser():
 
 if __name__ == "__main__":
     args = create_parser().parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
     run_ab_testing_experiment(args)
