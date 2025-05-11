@@ -61,7 +61,7 @@ def create_parser():
         help="Evogym environment name (e.g. Walker-v0)"
     )
     parser.add_argument(
-        "--pop_size", type=int, default=20,
+        "--pop_size", type=int, default=10,
         help="Population size for NEAT"
     )
     parser.add_argument(
@@ -69,7 +69,7 @@ def create_parser():
         help="Robot structure shape (height,width)"
     )
     parser.add_argument(
-        "--max_evaluations", type=int, default=400,
+        "--max_evaluations", type=int, default=100,
         help="Maximum total genome evaluations"
     )
     parser.add_argument(
@@ -77,14 +77,14 @@ def create_parser():
         help="Number of CPU cores to use"
     )
     parser.add_argument(
-        "--rl_policy_path", type=str, default="/home/pd468/qe/rl_mutation/models/option_critic_small/best_model/best_model.zip",
+        "--rl_policy_path", type=str, default="/home/pd468/qe/rl_mutation/models/option_critic_3/final_model.zip",
         help="Path to trained RL policy model"
     )
     parser.add_argument(
         "--eval_interval", type=int, default=500,
         help="Interval for evaluating the policy during training"
     )
-    parser.add_argument("--seed", type=int, default=42, help="Master seed for reproducibility")
+    parser.add_argument("--seed", type=int, default=0, help="Master seed for reproducibility")
 
     # Include PPO and A/B testing args
     add_ppo_args(parser)

@@ -2,9 +2,9 @@ class RewardConst:
     """
     Class to define the reward constant for the robot.
     """
-    INVALID_ROBOT = -2
+    INVALID_ROBOT = -1
     LOWER_BOUND = -1
-    CLIP_MAX = 4
-    CLIP_MIN = 0
-    CLIP_REWARD = 2
+    CLIP_REWARD = 1
+    POS_REWARD = 1
+    NEG_REWARD = -1
 

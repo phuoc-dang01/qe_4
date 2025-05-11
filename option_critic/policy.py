@@ -32,8 +32,6 @@ class OptionCriticPolicy(ActorCriticPolicy):
         )
         # Replace SB3 feature extractor
         self.extract_features = self.network.get_features
-        # if hasattr(self, "mlp_extractor"): del self.mlp_extractor
-        # if hasattr(self, "policy_net"): del self.policy_net
 
         # Hyperparameters
         self.num_options = num_options

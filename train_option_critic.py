@@ -4,18 +4,21 @@ import os
 import sys
 from pathlib import Path
 
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.absolute()))
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
+
+
 import neat
 import numpy as np
 import torch
-from fitness.reward_const import RewardConst
-
-import wandb
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.absolute()))
-
 from env.callbacks import NEATMetricsCallback, OptionMetricsCallback
 from env.neat_env import NeatMutationEnv
+from fitness import evaluator
+from fitness.reward_const import RewardConst
 from option_critic.algorithm import OptionCriticPPO
 from option_critic.policy import OptionCriticPolicy
 from stable_baselines3.common.callbacks import (CallbackList,
@@ -27,12 +30,13 @@ from stable_baselines3.common.vec_env import (DummyVecEnv, SubprocVecEnv,
                                               VecNormalize)
 from wandb.integration.sb3 import WandbCallback
 
+import wandb
+
 
 def make_vec_env(env_fn, n_envs: int = 1):
     """Create a vectorized environment with n_envs subprocesses or dummy."""
     env_fns = [env_fn for _ in range(n_envs)]
     return SubprocVecEnv(env_fns) if n_envs > 1 else DummyVecEnv(env_fns)
-
 
 def setup_neat_config(args):
     """Create and configure the NEAT configuration."""
@@ -54,7 +58,6 @@ def setup_neat_config(args):
         }
     )
     return config
-
 
 def create_option_critic_model(env, secondary_dims, args):
     """Instantiate the OptionCriticPPO model with given args and env."""
@@ -80,7 +83,6 @@ def create_option_critic_model(env, secondary_dims, args):
         termination_reg=args.termination_reg,
     )
     return model
-
 
 def setup_callbacks(args, eval_env):
     """Create a list of callbacks: checkpoint, eval, NEAT metrics, Wandb, and option metrics."""
@@ -111,7 +113,6 @@ def setup_callbacks(args, eval_env):
         log='parameters',
     )
     return CallbackList([checkpoint_callback, eval_callback, neat_metrics, option_metrics, wandb_cb])
-
 
 def train_option_critic(args):
     # Initialize W&B
@@ -164,30 +165,30 @@ def train_option_critic(args):
 def init_train_args():
     """Initialize the argument parser."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_envs', type=int, default=4)
-    parser.add_argument('--total_timesteps', type=int, default=1000)
+    parser.add_argument('--n_envs', type=int, default=14)
+    parser.add_argument('--total_timesteps', type=int, default=100)
 
-    parser.add_argument('--n_steps', type=int, default=64)
+    parser.add_argument('--n_steps', type=int, default=32)
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--n_epochs', type=int, default=4)
+    parser.add_argument('--n_epochs', type=int, default=2)
 
-    parser.add_argument('--eval_interval', type=int, default=500)
+    parser.add_argument('--eval_interval', type=int, default=50)
     parser.add_argument('--n_eval_episodes', type=int, default=3)
 
-    parser.add_argument('--save_interval', type=int, default=200)
+    parser.add_argument('--save_interval', type=int, default=50)
 
     parser.add_argument('--num_options', type=int, default=6)
-    parser.add_argument('--termination_reg', type=float, default=0.01)
-    parser.add_argument('--entropy_reg', type=float, default=0.01)
-    parser.add_argument('--learning_rate', type=float, default=3e-4)
+    parser.add_argument('--termination_reg', type=float, default=0.005)
+    parser.add_argument('--entropy_reg', type=float, default=0.015)
+    parser.add_argument('--learning_rate', type=float, default=5e-4)
 
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--gae_lambda', type=float, default=0.95)
+    parser.add_argument('--gamma', type=float, default=0.5)
+    parser.add_argument('--gae_lambda', type=float, default=0.9)
     parser.add_argument('--clip_range', type=float, default=0.2)
 
     parser.add_argument('--wandb_project', type=str, default='OptionCriticMutation')
     parser.add_argument('--wandb_grad_save_freq', type=int, default=0)
-    parser.add_argument('--save_dir', type=str, default='./models/option_critic')
+    parser.add_argument('--save_dir', type=str, default='./models/test_save')
     parser.add_argument('--structure_shape', type=tuple, default=(5,5))
     parser.add_argument('--env_name', type=str, default='Walker-v0')
     args = parser.parse_args()

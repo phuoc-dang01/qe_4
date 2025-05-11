@@ -1,13 +1,17 @@
 import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
+
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import neat
 import numpy as np
 import torch
-
-sys.path.append('/home/pd468/qe/evogym/examples/')
-sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT')
-
 from pytorch_neat.cppn import create_cppn
 
 

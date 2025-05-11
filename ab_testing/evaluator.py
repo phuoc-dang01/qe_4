@@ -2,6 +2,7 @@ import os
 import pdb
 import sys
 import time
+from pathlib import Path
 
 import neat
 import numpy as np
@@ -9,8 +10,10 @@ from ab_testing.robot_gen import CPPNRobotGenerator
 
 from evogym import get_full_connectivity, has_actuator, hashable, is_connected
 
-sys.path.append('/home/pd468/qe/evogym/examples/')
-sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
 from ppo.run import run_ppo
 

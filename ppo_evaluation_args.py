@@ -7,15 +7,15 @@ def create_ppo_eval_args():
     return Namespace(
         # ——————————————————————————————————————————————————————
         # Rollout & update sizes
-        n_steps        = 64,     # small horizon ⇒ more frequent updates
-        batch_size     = 16,     # tiny minibatches ⇒ more gradient steps per rollout
+        n_steps        = 128,     # small horizon ⇒ more frequent updates
+        batch_size     = 32,     # tiny minibatches ⇒ more gradient steps per rollout
         n_epochs       = 4,      # few passes over each rollout to avoid stale‐data overfit
         # ——————————————————————————————————————————————————————
         # Total interaction budget per genome
-        total_timesteps= 320,    # only 100 steps—fitness is noisy but cheap
+        total_timesteps= 1000,    # only 100 steps—fitness is noisy but cheap
         # ——————————————————————————————————————————————————————
         # Quick self‐evaluation
-        eval_interval  = 25,     # log every 25 steps (optional)
+        eval_interval  = 100,     # log every 25 steps (optional)
         n_evals        = 1,      # single eval rollout per eval_interval
         n_eval_envs    = 1,      # single environment for evaluation
         log_interval   = 5,      # print a line every 5 updates (optional)

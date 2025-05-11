@@ -27,7 +27,7 @@ class NeatMutationEnv(gym.Env):
         self.action_space_activation   = spaces.Discrete(len(self.activation_functions))
         self.action_space_node_select  = spaces.Discrete(5)
         self.action_space_conn_select  = spaces.Discrete(5)
-        self.action_space_weight_change= spaces.Discrete(11)
+        self.action_space_weight_change= spaces.Discrete(5)
 
         self.action_spaces_consequences = [
             self.action_space_activation,    # add_node
@@ -110,28 +110,76 @@ class NeatMutationEnv(gym.Env):
         elif primary == self.MODIFY_WEIGHT:
             conns = list(self.genome.connections.values())
             if conns:
-                B = self.action_spaces_consequences[primary].n
-                bucket = secondary * max(1, len(conns) // B)
-                for cg in conns[bucket:bucket + max(1, len(conns)//B)]:
-                    cg.mutate(cfg)
+                num_conns = len(conns)
+                # Map to valid range with modulo
+                conn_index = secondary % num_conns
+                cg = conns[conn_index]
+
+                # Apply mutation based on NEAT parameters
+                if random.random() < self.config.genome_config.weight_mutate_rate:
+                    if random.random() < self.config.genome_config.weight_replace_rate:
+                        # Complete replacement
+                        cg.weight = random.gauss(
+                            self.config.genome_config.weight_init_mean,
+                            self.config.genome_config.weight_init_stdev
+                        )
+                    else:
+                        # Perturbation
+                        cg.weight += random.gauss(0.0, 1.0) * self.config.genome_config.weight_mutate_power
+
+
+                    # Ensure weight is within bounds
+                    cg.weight = max(
+                        self.config.genome_config.weight_min_value,
+                        min(cg.weight, self.config.genome_config.weight_max_value)
+                    )
 
         elif primary == self.MODIFY_BIAS:
             nodes = list(self.genome.nodes.values())
             if nodes:
-                B = self.action_spaces_consequences[primary].n
-                bucket = secondary * max(1, len(nodes) // B)
-                for ng in nodes[bucket:bucket + max(1, len(nodes)//B)]:
-                    ng.mutate(cfg)
+                num_nodes = len(nodes)
+                # Map to valid range with modulo
+                node_index = secondary % num_nodes
+                ng = nodes[node_index]
+
+                # Apply bias mutation with similar logic
+                if random.random() < self.config.genome_config.bias_mutate_rate:
+                    if random.random() < self.config.genome_config.bias_replace_rate:
+                        # Complete replacement
+                        ng.bias = random.gauss(
+                            self.config.genome_config.bias_init_mean,
+                            self.config.genome_config.bias_init_stdev
+                        )
+                    else:
+                        # Perturbation
+                        ng.bias += random.gauss(0.0, 1.0) * self.config.genome_config.bias_mutate_power
+
+                    # Ensure bias is within bounds
+                    ng.bias = max(
+                        self.config.genome_config.bias_min_value,
+                        min(ng.bias, self.config.genome_config.bias_max_value)
+                    )
 
         # Compute reward + termination
         current = self._evaluate_genome()
+        reward, terminated = self.calculate_reward(current, self.prev_fitness)
+
+        if len(self.fitness_history) >= 2:
+            if current > self.fitness_history[-1] and self.fitness_history[-1] > self.fitness_history[-2]:
+                reward += 0.25
+
+
+        self.prev_fitness = current
+        self.fitness_history.append(current)
+        self.steps += 1
+
+        terminated = terminated or (self.steps >= self.max_steps)
 
         if current <= RewardConst.INVALID_ROBOT:
             # enforce the hard penalty exactly, no further shaping
             reward = RewardConst.INVALID_ROBOT
             terminated = True
         else:
-            # 2) normal fitness, then clip to [LOWER_BOUND, CLIP_MAX] = [0, 2]
             reward = float(current - self.prev_fitness)
             terminated = False
 
@@ -140,9 +188,6 @@ class NeatMutationEnv(gym.Env):
 
         # counter
         self.steps += 1
-
-        # default params
-        terminated = False
         truncated  = (self.steps >= self.max_steps)
 
         info = {
@@ -158,6 +203,20 @@ class NeatMutationEnv(gym.Env):
         }
 
         return self._get_observation(), reward, terminated, truncated, info
+
+    def calculate_reward(self, current_fitness, prev_fitness):
+        """Calculate reward based on fitness improvement with immediate bonuses."""
+        # Handle invalid genomes
+        if current_fitness <= RewardConst.INVALID_ROBOT:
+            return RewardConst.INVALID_ROBOT, True
+
+        # Calculate improvement
+        improvement = current_fitness - prev_fitness
+
+        if improvement > 0:
+            return RewardConst.POS_REWARD, False
+        else:
+            return RewardConst.NEG_REWARD, False
 
     def _add_node_with_activation(self, activation_function):
         """Add a node with the specified activation function."""

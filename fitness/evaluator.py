@@ -3,10 +3,14 @@
 import os
 import sys
 from pathlib import Path
+# sys.path.append('/home/pd468/qe/evogym/examples/ppo/')
+# sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
 
-sys.path.append('/home/pd468/qe/evogym/examples/ppo/')
-sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # ↑ 3 levels: fitness → rl_mutation → qe
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 import pdb
 
 import neat
