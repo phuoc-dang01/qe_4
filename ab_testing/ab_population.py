@@ -57,14 +57,22 @@ class ABTestingPopulation(neat.Population):
             arr = np.array(values, dtype=float)
             return (float(arr.min()), float(arr.mean()), float(arr.max()))
 
+        def compute_std(values):
+            # simple standard‐deviation, 0.0 if empty
+            if not values:
+                return 0.0
+            return float(np.std(np.array(values, dtype=float)))
+
         stats_update = {
             'rl': {
                 'fitness': compute_stats([g.fitness for g in rl_group if g.fitness is not None and np.isfinite(g.fitness)]),
-                'complexity': compute_stats([len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', [])) for g in rl_group])
+                'complexity': compute_stats([len(g.nodes)+len(g.connections) for g in rl_group]),
+                'std_fitness': compute_std([g.fitness for g in rl_group if g.fitness is not None and np.isfinite(g.fitness)])
             },
             'standard': {
                 'fitness': compute_stats([g.fitness for g in std_group if g.fitness is not None and np.isfinite(g.fitness)]),
-                'complexity': compute_stats([len(getattr(g, 'nodes', [])) + len(getattr(g, 'connections', [])) for g in std_group])
+                'complexity': compute_stats([len(g.nodes)+len(g.connections) for g in std_group]),
+                'std_fitness': compute_std([g.fitness for g in std_group if g.fitness is not None and np.isfinite(g.fitness)])
             }
         }
         return stats_update

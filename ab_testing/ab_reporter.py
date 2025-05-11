@@ -144,29 +144,64 @@ class ABTestingReporter(neat.BaseReporter):
             plt.savefig(os.path.join(report_path, 'ab_advantage.png'))
             plt.close()
 
-        # 4. Generation summary text
-        with open(os.path.join(report_path, 'statistics.txt'), 'w') as f:
-            f.write(f"A/B Testing Report - Generation {generation}\n")
-            f.write("=" * 50 + "\n\n")
-            f.write("RL-Guided Group Summary:\n")
-            if stats['rl']['fitness']:
-                mn, mean, mx = stats['rl']['fitness'][-1]
-                f.write(f"  Fitness: min={mn:.2f}, mean={mean:.2f}, max={mx:.2f}\n")
-            if stats['rl']['complexity']:
-                mn, mean, mx = stats['rl']['complexity'][-1]
-                f.write(f"  Complexity: min={mn:.2f}, mean={mean:.2f}, max={mx:.2f}\n")
-            f.write("\nStandard Group Summary:\n")
-            if stats['standard']['fitness']:
-                mn, mean, mx = stats['standard']['fitness'][-1]
-                f.write(f"  Fitness: min={mn:.2f}, mean={mean:.2f}, max={mx:.2f}\n")
-            if stats['standard']['complexity']:
-                mn, mean, mx = stats['standard']['complexity'][-1]
-                f.write(f"  Complexity: min={mn:.2f}, mean={mean:.2f}, max={mx:.2f}\n")
+        # 4. Delta Mean Fitness over Generations
+        # -----------------------------------
+        # pull the float lists
+        rl_delta  = stats['rl']['delta_fitness']
+        std_delta = stats['standard']['delta_fitness']
+        # only plot as many gens as both arms have deltas
+        n_d = min(len(rl_delta), len(std_delta))
+        if n_d > 1:  # need at least two points to see a trend
+            gens_d = range(n_d)
+            plt.figure(figsize=(10, 6))
+            plt.plot(gens_d, rl_delta[:n_d], 'b-o', label='RL delta_mean fitness')
+            plt.plot(gens_d, std_delta[:n_d], 'r-o', label='Std delta_mean fitness')
+
+            plt.axhline(0, color='k', linestyle='--', linewidth=1)
+            plt.xlabel('Generation')
+            plt.ylabel('Delta Mean Fitness')
+            plt.title('Generation‐to‐Generation Improvement')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(report_path, 'delta_fitness_comparison.png'))
+            plt.close()
+
+        rl_std  = stats['rl']['std_fitness']
+        std_std = stats['standard']['std_fitness']
+        n_s = min(len(rl_std), len(std_std))
+        if n_s > 0:
+            gens_s = range(n_s)
+            plt.figure(figsize=(10, 6))
+            plt.plot(gens_s, rl_std[:n_s], 'b--s', label='RL Average(fitness)')
+            plt.plot(gens_s, std_std[:n_s], 'r--s', label='Std Std(fitness)')
+            plt.xlabel('Generation')
+            plt.ylabel('Fitness Standard Dev')
+            plt.title('Fitness Diversity Over Time')
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(os.path.join(report_path, 'fitness_diversity.png'))
+            plt.close()
 
     def post_evaluate(self, config, population, species, best_genome):
-        # 1) compute this generation's metrics
+        # 1) compute this generation's metrics (min,mean,max + std)
         stats_update = self.reproduction.parent_population._update_group_stats(
             self.generation, population
         )
-        # 2) merge into the rolling stats and persist
+        # 2) compute delta mean_fitness = mean_g – mean_{g-1}, for each arm
+        if self.generation > 0:
+            prev = self.reproduction.stats  # lists up through gen-1
+            # RL delta
+            prev_rl_mean  = prev['rl']['fitness'][-1][1]
+            curr_rl_mean  = stats_update['rl']['fitness'][1]
+            stats_update['rl']['delta_fitness'] = curr_rl_mean - prev_rl_mean
+            # Standard delta
+            prev_std_mean = prev['standard']['fitness'][-1][1]
+            curr_std_mean = stats_update['standard']['fitness'][1]
+            stats_update['standard']['delta_fitness'] = curr_std_mean - prev_std_mean
+        else:
+            # no prior gen → zero deltas
+            stats_update['rl']['delta_fitness']      = 0.0
+            stats_update['standard']['delta_fitness'] = 0.0
+
+        # 3) merge into the rolling stats and persist
         self.update_stats(self.generation, stats_update)
