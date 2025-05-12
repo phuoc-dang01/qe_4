@@ -77,11 +77,11 @@ def create_parser():
         help="Number of CPU cores to use"
     )
     parser.add_argument(
-        "--rl_policy_path", type=str, default="/home/pd468/qe/rl_mutation/models/option_critic_3/final_model.zip",
+        "--rl_policy_path", type=str, default="/home/pd468/qe/model_backup/option_critic_long/best_model/best_model.zip",
         help="Path to trained RL policy model"
     )
     parser.add_argument(
-        "--eval_interval", type=int, default=500,
+        "--eval_interval", type=int, default=100,
         help="Interval for evaluating the policy during training"
     )
     parser.add_argument("--seed", type=int, default=0, help="Master seed for reproducibility")

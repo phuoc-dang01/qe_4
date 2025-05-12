@@ -168,17 +168,17 @@ def train_option_critic(args):
 def init_train_args():
     """Initialize the argument parser."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_envs', type=int, default=22)
-    parser.add_argument('--total_timesteps', type=int, default=10000)
+    parser.add_argument('--n_envs', type=int, default=18)
+    parser.add_argument('--total_timesteps', type=int, default=1000)
 
     parser.add_argument('--n_steps', type=int, default=128)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--n_epochs', type=int, default=4)
 
-    parser.add_argument('--eval_interval', type=int, default=2000)
+    parser.add_argument('--eval_interval', type=int, default=200)
     parser.add_argument('--n_eval_episodes', type=int, default=5)
 
-    parser.add_argument('--save_interval', type=int, default=2000)
+    parser.add_argument('--save_interval', type=int, default=200)
 
     parser.add_argument('--num_options', type=int, default=6)
     parser.add_argument('--termination_reg', type=float, default=0.005)
