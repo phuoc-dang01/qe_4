@@ -19,10 +19,17 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
+import multiprocessing as mp
+from functools import partial
+
 from ppo.run import run_ppo
 
 
 class GenomeEvaluator:
+    _rl_model = None
+    _rl_model_path = None
+
+
     @staticmethod
     def eval_fitness(genome, config, genome_id, generation):
         robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
@@ -82,3 +89,9 @@ class GenomeEvaluator:
             GenomeEvaluator.eval_constraint(genome, config, genome_id, generation)
             for genome_id, genome in genome_list
         ]
+
+    @staticmethod
+    def _eval_fitness_worker(data, config, generation):
+        """Worker function for parallel evaluation"""
+        genome_id, genome = data
+        return GenomeEvaluator.eval_fitness(genome, config, genome_id, generation)

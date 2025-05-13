@@ -197,6 +197,8 @@ class ABTestingReproduction(neat.DefaultReproduction):
             repro_cutoff = max(repro_cutoff, 2)  # At least 2 parents
             old_members = old_members[:repro_cutoff]
 
+            mutation_data = {}
+
             # Create offspring
             while spawn > 0:
                 spawn -= 1
@@ -211,19 +213,25 @@ class ABTestingReproduction(neat.DefaultReproduction):
                 child.configure_crossover(parent1, parent2, config.genome_config)
 
                 # Determine which group this child belongs to
-                p1g = self.genome_group.get(parent1_id, self._assign_random_group())
-                p2g = self.genome_group.get(parent2_id, self._assign_random_group())
-                if p1g == p2g:
-                    child_group = p1g
-                else:
-                    child_group = self._assign_random_group()
+                child_group = self._assign_competitive_group(parent1_id, parent2_id)
                 self.genome_group[gid] = child_group
+
+                pre_mutation_fitness = None
+                if hasattr(child, 'fitness') and child.fitness is not None:
+                    pre_mutation_fitness = child.fitness
 
                 # Apply mutations based on group
                 if child_group == 'rl':
-                    child = self._apply_rl_mutation(child, config.genome_config)
+                    child = self._apply_rl_mutation(child)
                 else:
                     child.mutate(config.genome_config)
+
+                    # Record mutation effect if we have pre-mutation fitness
+                    if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None:
+                        # Post-mutation fitness will be set during evaluation
+                        self.metrics_tracker.record_mutation_effect(
+                            gid, "standard", pre_mutation_fitness, None
+                        )
 
                 # Record group assignment and ancestry
                 self.ancestors[gid] = (parent1_id, parent2_id)
@@ -238,40 +246,76 @@ class ABTestingReproduction(neat.DefaultReproduction):
         self.logger.info(f"Reproduction complete. New population size: {len(new_population)}")
 
         # # Only collect group‐specific stats from gen 1 onward
-        # if generation > 0 and self.tracking_enabled and self.parent_population is not None:
-        #     self.parent_population._update_group_stats(generation, new_population)
+        if generation > 0 and self.tracking_enabled and self.parent_population is not None:
+            self.parent_population._update_group_stats(generation, new_population)
         return new_population
 
     def _assign_random_group(self):
         """Randomly assign a genome to either 'rl' or 'standard' group based on ab_ratio."""
         return 'rl' if random.random() < self.ab_ratio else 'standard'
 
-    def _apply_rl_mutation(self, genome, _genome_config):
+    def _copy_genome(self, genome):
+        """Create a deep copy of a genome."""
+        # This is a simplified implementation - you might need to adjust based on your genome class
+        import copy
+        return copy.deepcopy(genome)
+
+    def _apply_rl_mutation(self, genome):
         print(f"[RL_MUTATE] Genome: {genome.key}")
 
-        # 1) Reset all the Gym wrappers (this also calls NeatMutationEnv.reset → _reset_bookkeeping)
-        obs = self.eval_env.reset()
+        # Store pre-mutation fitness (if it exists)
+        pre_mutation_fitness = None
+        if hasattr(genome, 'fitness') and genome.fitness is not None:
+            pre_mutation_fitness = genome.fitness
 
-        # 2) Drill down to the raw NeatMutationEnv
+        # Reset environment
+        obs = self.eval_env.reset()
         inner_vec = getattr(self.eval_env, 'venv', self.eval_env)
         wrapped = inner_vec.envs[0]
         base_env = wrapped.unwrapped
 
-        # 3) Inject your genome and compute its initial fitness
+        # Inject genome into environment
         base_env.genome = genome
-        base_env.prev_fitness = base_env._evaluate_genome()
 
-        # 4) Now do N RL steps
-        for step in range(5):
+        # Set previous fitness - use existing value if available, otherwise calculate
+        if pre_mutation_fitness is not None:
+            base_env.prev_fitness = pre_mutation_fitness
+        else:
+            base_env.prev_fitness = base_env._evaluate_genome()
+
+        # Track best mutation result
+        best_genome = None
+        best_reward = float('-inf')
+        best_action = None
+
+        # Perform RL-guided mutations
+        for step in range(3):
             actions, _ = self.rl_model.predict(obs, deterministic=True)
+            action = actions[0]
             print(f"[RL_MUTATE] Step {step+1}: action={actions[0]}")
             obs, rewards, dones, infos = self.eval_env.step(actions)
-            print(f"    reward={rewards[0]:.4f}, done={dones[0]}")
+
+            # Check if this mutation result is better than previous best
+            current_reward = rewards[0]
+            print(f"    reward={current_reward:.4f}, done={dones[0]}")
+
+            # If this is the best result so far, save it
+            if current_reward > best_reward:
+                best_reward = current_reward
+                best_action = action.tolist() if hasattr(action, 'tolist') else action
+                # Create a deep copy of the current genome
+                best_genome = self._copy_genome(base_env.genome)
+
             if dones[0]:
                 break
 
-        # 5) Return the mutated genome
-        return base_env.genome
+        if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None and best_genome is not None:
+            self.metrics_tracker.record_mutation_effect(
+                genome.key, "rl", pre_mutation_fitness, best_reward  # Use the best reward as post-mutation fitness
+            )
+
+        # Return the best mutation result
+        return best_genome if best_genome is not None else base_env.genome
 
     def _get_observation(self, genome):
         """Extract features from the genome to feed into RL policy."""
@@ -281,3 +325,114 @@ class ABTestingReproduction(neat.DefaultReproduction):
         env.genome = genome
         return env._get_observation()
 
+    def _assign_competitive_group(self, parent1_id, parent2_id):
+        """
+        Assign group based on competitive fitness of parents.
+
+        Args:
+            parent1_id: ID of first parent
+            parent2_id: ID of second parent
+
+        Returns:
+            Group assignment ('rl' or 'standard')
+        """
+        # Get parent genomes
+        parent1 = self.parent_population.population.get(parent1_id)
+        parent2 = self.parent_population.population.get(parent2_id)
+
+        # Default to random assignment if parents not found
+        if not parent1 or not parent2:
+            return self._assign_random_group()
+
+        # Get parent groups
+        p1_group = self.genome_group.get(parent1_id, self._assign_random_group())
+        p2_group = self.genome_group.get(parent2_id, self._assign_random_group())
+
+        # If both parents have same group, child inherits that group
+        if p1_group == p2_group:
+            return p1_group
+
+        # If parents have different groups, use weighted random based on fitness
+        p1_fitness = parent1.fitness if hasattr(parent1, 'fitness') and parent1.fitness is not None else 0
+        p2_fitness = parent2.fitness if hasattr(parent2, 'fitness') and parent2.fitness is not None else 0
+
+        # Prevent division by zero
+        total_fitness = p1_fitness + p2_fitness
+        if total_fitness <= 0:
+            return self._assign_random_group()
+
+        # Map parent fitness to their group
+        group_weights = {
+            p1_group: p1_fitness / total_fitness,
+            p2_group: p2_fitness / total_fitness
+        }
+
+        # Weighted random choice
+        r = random.random()
+        if r < group_weights[p1_group]:
+            return p1_group
+        else:
+            return p2_group
+
+    def _assign_competitive_group(self, parent1_id, parent2_id):
+        """
+        Assign group based on competitive fitness of parents.
+
+        Args:
+            parent1_id: ID of first parent
+            parent2_id: ID of second parent
+
+        Returns:
+            Group assignment ('rl' or 'standard')
+        """
+        # Get parent genomes
+        parent1 = None
+        parent2 = None
+
+        # Try to get the parents from the population - they might be in the new or old population
+        if parent1_id in self.parent_population.population:
+            parent1 = self.parent_population.population[parent1_id]
+        if parent2_id in self.parent_population.population:
+            parent2 = self.parent_population.population[parent2_id]
+
+        # Default to random assignment if parents not found
+        if not parent1 or not parent2:
+            return self._assign_random_group()
+
+        # Get parent groups
+        p1_group = self.genome_group.get(parent1_id, self._assign_random_group())
+        p2_group = self.genome_group.get(parent2_id, self._assign_random_group())
+
+        # If both parents have same group, child inherits that group
+        if p1_group == p2_group:
+            return p1_group
+
+        # If parents have different groups, use weighted random based on fitness
+        p1_fitness = parent1.fitness if hasattr(parent1, 'fitness') and parent1.fitness is not None else 0
+        p2_fitness = parent2.fitness if hasattr(parent2, 'fitness') and parent2.fitness is not None else 0
+
+        # Make sure fitness is positive for weighting
+        p1_fitness = max(0, p1_fitness)
+        p2_fitness = max(0, p2_fitness)
+
+        # Prevent division by zero
+        total_fitness = p1_fitness + p2_fitness
+        if total_fitness <= 0:
+            return self._assign_random_group()
+
+        # Map parent fitness to their group
+        group_weights = {
+            p1_group: p1_fitness / total_fitness,
+            p2_group: p2_fitness / total_fitness
+        }
+
+        # Log the assignment probabilities
+        print(f"Child of parents {parent1_id}({p1_group}, fitness={p1_fitness:.4f}) and {parent2_id}({p2_group}, fitness={p2_fitness:.4f})")
+        print(f"  Group assignment probabilities: {p1_group}={group_weights[p1_group]:.2f}, {p2_group}={group_weights[p2_group]:.2f}")
+
+        # Weighted random choice
+        r = random.random()
+        chosen_group = p1_group if r < group_weights[p1_group] else p2_group
+        print(f"  Assigned to group: {chosen_group} (r={r:.2f})")
+
+        return chosen_group

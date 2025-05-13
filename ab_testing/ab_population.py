@@ -11,11 +11,14 @@ from .ab_reproduction import ABTestingReproduction
 
 class ABTestingPopulation(neat.Population):
     """Population class that supports A/B testing of mutation strategies."""
-
     def __init__(self, config, rl_policy_path=None, ab_ratio=0.5, tracking_enabled=True):
         """Initialize population with A/B testing capabilities."""
         # Initialize as a standard population
         super().__init__(config)
+
+        from .metrics_tracker import MetricsTracker
+        self.metrics_tracker = MetricsTracker(config.extra_info['save_path'])
+
         # Replace the reproduction method with our A/B testing version
         self.reproduction = ABTestingReproduction(
             config.reproduction_config,
@@ -27,16 +30,26 @@ class ABTestingPopulation(neat.Population):
             parent_population=self,
         )
 
+        # Share the metrics tracker with reproduction
+        self.reproduction.metrics_tracker = self.metrics_tracker
+
         # Add AB testing reporter
         self.ab_reporter = ABTestingReporter(self.reproduction, config.extra_info['save_path'], report_interval=1)
         self.add_reporter(self.ab_reporter)
         self.save_reporter = SaveResultReporter(config.extra_info['save_path'])
         self.add_reporter(self.save_reporter)
 
-        for genome_id in self.population:
-            self.reproduction.genome_group[genome_id] = self.reproduction._assign_random_group()
-
-
+        ids     = list(self.population)
+        k       = round(len(ids) * 0.5)
+        rl_ids  = set(random.sample(ids, k))
+        # Init random group assignment
+        for gid in ids:
+            self.reproduction.genome_group[gid] = 'rl' if gid in rl_ids else 'standard'
+            # Record initial genomes
+            self.metrics_tracker.record_genome(
+                0, gid, self.population[gid],
+                self.reproduction.genome_group[gid]
+            )
 
     def _update_group_stats(self, generation, population):
         # ── ENSURE EVERY GENOME IS TAGGED ──
@@ -129,6 +142,57 @@ class ABTestingPopulation(neat.Population):
             fitness_function(list(self.population.items()), self.config, self.generation)
             # self._update_group_stats(self.generation, self.population)
 
+            # genomes_to_evaluate = []
+            # for genome_id, genome in self.population.items():
+            #     needs_evaluation = True
+            #     # If genome already has valid fitness, skip evaluation
+            #     if hasattr(genome, 'fitness') and genome.fitness is not None and np.isfinite(genome.fitness):
+            #         needs_evaluation = False
+
+            #     # Check structure hash cache if available
+            #     if needs_evaluation and hasattr(self.config, 'extra_info') and 'structure_hashes' in self.config.extra_info:
+            #         # Generate robot from genome
+            #         from .robot_gen import CPPNRobotGenerator
+            #         robot = CPPNRobotGenerator.get_robot_from_genome(genome, self.config)
+
+            #         # Check if this structure has been seen before
+            #         from evogym import hashable
+            #         robot_hash = hashable(robot)
+            #         if robot_hash in self.config.extra_info["structure_hashes"]:
+            #             cached_fitness = self.config.extra_info["structure_hashes"][robot_hash]
+            #             if cached_fitness is not True:  # True means it was seen but not evaluated yet
+            #                 genome.fitness = cached_fitness
+            #                 needs_evaluation = False
+            #                 print(f"   [CACHE HIT] Reusing fitness {cached_fitness:.5f} for genome {genome_id}")
+
+            #     if needs_evaluation:
+            #         genomes_to_evaluate.append((genome_id, genome))
+
+            # if genomes_to_evaluate:
+            #     print(f"Evaluating {len(genomes_to_evaluate)} out of {len(self.population)} genomes")
+            #     fitness_function(genomes_to_evaluate, self.config, self.generation)
+            # else:
+            #     print("All genomes have cached fitness values - skipping evaluation")
+
+            # # Record metrics for this generation
+            self.metrics_tracker.record_generation_stats(
+                self.generation,
+                self.population,
+                self.reproduction.genome_group
+            )
+
+            # # Track individual genomes
+            for genome_id, genome in self.population.items():
+                group = self.reproduction.genome_group.get(genome_id, 'unknown')
+                parent_ids = self.reproduction.ancestors.get(genome_id, (None, None))
+                self.metrics_tracker.record_genome(
+                    self.generation,
+                    genome_id,
+                    genome,
+                    group,
+                    parent_ids
+                )
+
             # Gather and report statistics.
             best = None
             for g in self.population.values():
@@ -182,6 +246,9 @@ class ABTestingPopulation(neat.Population):
 
             self.reporters.end_generation(self.config, self.population, self.species)
             self.generation += 1
+            self.metrics_tracker.save_metrics()
+
+        self.metrics_tracker.generate_reports()
 
         if self.config.no_fitness_termination:
             self.reporters.found_solution(self.config, self.generation, self.best_genome)

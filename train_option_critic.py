@@ -13,6 +13,8 @@ sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
 
+from datetime import datetime
+
 import neat
 import numpy as np
 import torch
@@ -88,16 +90,20 @@ def create_option_critic_model(env, secondary_dims, args):
 def setup_callbacks(args, eval_env):
     """Create a list of callbacks: checkpoint, eval, NEAT metrics, Wandb, and option metrics."""
     os.makedirs(args.save_dir, exist_ok=True)
+    ckpt_dir = os.path.join(args.save_dir, 'checkpoints')
+    best_dir = os.path.join(args.save_dir, 'best_model')
+    os.makedirs(ckpt_dir, exist_ok=True)
+    os.makedirs(best_dir, exist_ok=True)
     # Checkpoint every save_interval steps
     checkpoint_callback = CheckpointCallback(
         save_freq=args.save_interval,
-        save_path=os.path.join(args.save_dir, 'checkpoints'),
+        save_path=ckpt_dir,
         name_prefix='option_critic',
         save_replay_buffer=False
     )
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path=os.path.join(args.save_dir, 'best_model'),
+        best_model_save_path=best_dir,
         log_path=os.path.join(args.save_dir, 'eval_logs'),
         eval_freq=args.eval_interval,
         n_eval_episodes=args.n_eval_episodes,
@@ -113,7 +119,8 @@ def setup_callbacks(args, eval_env):
         verbose=1,
         log='parameters',
     )
-    return CallbackList([checkpoint_callback, eval_callback, neat_metrics, option_metrics, wandb_cb])
+    # return CallbackList([checkpoint_callback, eval_callback, neat_metrics, option_metrics, wandb_cb])
+    return CallbackList([checkpoint_callback, eval_callback, wandb_cb, neat_metrics])
 
 def train_option_critic(args):
     # Initialize W&B
@@ -171,27 +178,28 @@ def init_train_args():
     parser.add_argument('--n_envs', type=int, default=18)
     parser.add_argument('--total_timesteps', type=int, default=1000)
 
-    parser.add_argument('--n_steps', type=int, default=128)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--n_epochs', type=int, default=4)
+    parser.add_argument('--n_steps', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=64) # n_steps * n_epochs
+    parser.add_argument('--n_epochs', type=int, default=8)
 
-    parser.add_argument('--eval_interval', type=int, default=200)
-    parser.add_argument('--n_eval_episodes', type=int, default=5)
+    parser.add_argument('--eval_interval', type=int, default=256)
+    parser.add_argument('--n_eval_episodes', type=int, default=2)
 
-    parser.add_argument('--save_interval', type=int, default=200)
+    parser.add_argument('--save_interval', type=int, default=500)
 
     parser.add_argument('--num_options', type=int, default=6)
-    parser.add_argument('--termination_reg', type=float, default=0.005)
-    parser.add_argument('--entropy_reg', type=float, default=0.015)
-    parser.add_argument('--learning_rate', type=float, default=5e-4)
+    parser.add_argument('--termination_reg', type=float, default=0.02)
+    parser.add_argument('--entropy_reg', type=float, default=0.02)
+    parser.add_argument('--learning_rate', type=float, default=3e-4)
 
     parser.add_argument('--gamma', type=float, default=0.5)
-    parser.add_argument('--gae_lambda', type=float, default=0.9)
-    parser.add_argument('--clip_range', type=float, default=0.2)
+    parser.add_argument('--gae_lambda', type=float, default=0.8)
+    parser.add_argument('--clip_range', type=float, default=0.1)
 
     parser.add_argument('--wandb_project', type=str, default='OptionCriticMutation')
-    parser.add_argument('--wandb_grad_save_freq', type=int, default=0)
-    parser.add_argument('--save_dir', type=str, default='./models/test_save')
+    # parser.add_argument('--wandb_grad_save_freq', type=int, default=0)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    parser.add_argument('--save_dir', type=str, default=f'/home/pd468/qe/rl_mutation/models/{timestamp}')
     parser.add_argument('--structure_shape', type=tuple, default=(5,5))
     parser.add_argument('--env_name', type=str, default='Walker-v0')
     args = parser.parse_args()

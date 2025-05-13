@@ -7,4 +7,4 @@ class RewardConst:
     CLIP_REWARD = 1
     POS_REWARD = 1
     NEG_REWARD = -1
-
+    SCALE_PREVIOUS = 0.9

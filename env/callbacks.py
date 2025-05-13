@@ -54,7 +54,6 @@ class OptionMetricsCallback(BaseCallback):
         # Get info from most recent step
         if wandb.run is not None and hasattr(self.model, 'policy'):
             policy = self.model.policy
-
             # Log only termination probabilities
             if hasattr(policy, 'current_termination_logits'):
                 term_logits = policy.current_termination_logits.detach().cpu().numpy()

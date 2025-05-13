@@ -28,7 +28,7 @@ def load_option_critic_model(model_path, args):
     eval_env_fn = lambda: Monitor(NeatMutationEnv(neat_config),
                                   os.path.join(os.path.join(args.save_dir, 'logs'), 'eval'))
     eval_env = make_vec_env(eval_env_fn, 1)
-    eval_env = VecNormalize.load("/home/pd468/qe/rl_mutation/models/option_critic_small/vecnormalize.pkl", eval_env)
+    eval_env = VecNormalize.load("/home/pd468/qe/rl_mutation/models/20250512_2236/vecnormalize.pkl", eval_env)
 
     # Get action dimensions
     raw_env = NeatMutationEnv(neat_config)
@@ -182,45 +182,45 @@ def test_option_critic_model(model, eval_env, num_steps=20):
 
     return history
 
-# model_path = "/home/pd468/qe/rl_mutation/models/option_critic_small/best_model/best_model.zip"
-# args = init_train_args()
-# model, eval_env = load_option_critic_model(model_path, args)
+model_path = "/home/pd468/qe/rl_mutation/models/20250512_2236/final_model.zip"
+args = init_train_args()
+model, eval_env = load_option_critic_model(model_path, args)
 
-# # Test the model for 50 steps
-# history = test_option_critic_model(model, eval_env, num_steps=10)
+# Test the model for 50 steps
+history = test_option_critic_model(model, eval_env, num_steps=10)
 
-# print("After history:")
-# # If you want to visualize the option switches over time
-# try:
-#     # Set non-interactive backend before importing pyplot
-#     import matplotlib
-#     matplotlib.use('Agg')  # Use the 'Agg' backend which doesn't require a display
-#     import matplotlib.pyplot as plt
+print("After history:")
+# If you want to visualize the option switches over time
+try:
+    # Set non-interactive backend before importing pyplot
+    import matplotlib
+    matplotlib.use('Agg')  # Use the 'Agg' backend which doesn't require a display
+    import matplotlib.pyplot as plt
 
-#     # Extract options from history
-#     steps = [record['step'] for record in history]
-#     options = [record['option'] for record in history]
-#     rewards = [record['reward'] for record in history]
+    # Extract options from history
+    steps = [record['step'] for record in history]
+    options = [record['option'] for record in history]
+    rewards = [record['reward'] for record in history]
 
-#     # Create figure with two subplots
-#     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-#     # Plot options
-#     ax1.plot(steps, options, marker='o', linestyle='-', markersize=8)
-#     ax1.set_ylabel('Option')
-#     ax1.set_title('Option Selection Over Time')
-#     ax1.grid(True)
+    # Plot options
+    ax1.plot(steps, options, marker='o', linestyle='-', markersize=8)
+    ax1.set_ylabel('Option')
+    ax1.set_title('Option Selection Over Time')
+    ax1.grid(True)
 
-#     # Plot rewards
-#     ax2.plot(steps, rewards, marker='x', linestyle='-', color='orange')
-#     ax2.set_xlabel('Step')
-#     ax2.set_ylabel('Reward')
-#     ax2.set_title('Rewards Over Time')
-#     ax2.grid(True)
+    # Plot rewards
+    ax2.plot(steps, rewards, marker='x', linestyle='-', color='orange')
+    ax2.set_xlabel('Step')
+    ax2.set_ylabel('Reward')
+    ax2.set_title('Rewards Over Time')
+    ax2.grid(True)
 
-#     plt.tight_layout()
-#     plt.savefig('option_critic_test.png')
-#     plt.close()  # Important: close the figure to free memory
-#     print("Created visualization: option_critic_test.png")
-# except ImportError:
-#     print("Matplotlib not available - skipping visualization")
+    plt.tight_layout()
+    plt.savefig('option_critic_test.png')
+    plt.close()  # Important: close the figure to free memory
+    print("Created visualization: option_critic_test.png")
+except ImportError:
+    print("Matplotlib not available - skipping visualization")

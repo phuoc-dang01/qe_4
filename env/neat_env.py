@@ -211,9 +211,9 @@ class NeatMutationEnv(gym.Env):
             return RewardConst.INVALID_ROBOT, True
 
         # Calculate improvement
-        improvement = current_fitness - prev_fitness
+        improvement = current_fitness - (prev_fitness * RewardConst.SCALE_PREVIOUS)
 
-        if improvement > 0:
+        if improvement >= 0:
             return RewardConst.POS_REWARD, False
         else:
             return RewardConst.NEG_REWARD, False

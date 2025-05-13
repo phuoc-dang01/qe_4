@@ -8,7 +8,7 @@ def create_ppo_eval_args():
         # ——————————————————————————————————————————————————————
         # Rollout & update sizes
         n_steps        = 128,     # small horizon ⇒ more frequent updates
-        batch_size     = 32,     # tiny minibatches ⇒ more gradient steps per rollout
+        batch_size     = 4,     # tiny minibatches ⇒ more gradient steps per rollout
         n_epochs       = 4,      # few passes over each rollout to avoid stale‐data overfit
         # ——————————————————————————————————————————————————————
         # Total interaction budget per genome
@@ -22,12 +22,13 @@ def create_ppo_eval_args():
         verbose_ppo    = 0,      # minimize console clutter
         # ——————————————————————————————————————————————————————
         # Learning & regularization
-        learning_rate  = 1e-3,   # slightly higher LR to adapt fast on tiny data
-        gamma          = 0.95,   # shallower discounting for short rollouts
-        gae_lambda     = 0.9,    # more bias, less variance in GAE
+        learning_rate  = 5e-4,   # slightly higher LR to adapt fast on tiny data
+        gamma          = 0.99,   # shallower discounting for short rollouts
+        gae_lambda     = 0.95,    # more bias, less variance in GAE
         vf_coef        = 0.5,    # standard value loss weight
         max_grad_norm  = 0.5,    # keep gradients well‐behaved
         ent_coef       = 0.01,   # minimal entropy bonus
-        clip_range     = 0.2,    # standard PPO clipping
+        clip_range     = 0.1,    # standard PPO clipping,
+
     )
 

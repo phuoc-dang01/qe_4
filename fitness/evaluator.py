@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # ↑ 3 levels: fi
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
 sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
+
 import pdb
 
 import neat
@@ -85,8 +86,7 @@ class FitnessEvaluator:
             )
             return float(perf)
         except Exception as e:
-            print("PPO eval error:", e)
-            return -1
+            return RewardConst.NEG_REWARD
 
     def evaluate(self, genome):
         robot = self.genome_to_robot(genome)

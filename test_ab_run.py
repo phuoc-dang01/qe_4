@@ -1,22 +1,27 @@
 # train_ab_testing.py
 import argparse
 import multiprocessing as mp
+import os
 import sys
+from pathlib import Path
+
+sys.path.append('/home/pd468/qe/evogym/examples/')
+sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # ↑ 3 levels: → rl_mutation → qe
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
 import matplotlib
 
 matplotlib.use('Agg')
 import argparse
+import pdb
 import random
 
 import numpy as np
 import torch
-
-sys.path.append('/home/pd468/qe/evogym/examples/')
-sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
-
-import pdb
-
 from ab_testing.runner import run_ab_testing_experiment
 from ppo.args import add_ppo_args
 
@@ -77,12 +82,8 @@ def create_parser():
         help="Number of CPU cores to use"
     )
     parser.add_argument(
-        "--rl_policy_path", type=str, default="/home/pd468/qe/model_backup/option_critic_long/best_model/best_model.zip",
+        "--rl_policy_path", type=str, default="/home/pd468/qe/rl_mutation/models/20250512_2236/final_model.zip",
         help="Path to trained RL policy model"
-    )
-    parser.add_argument(
-        "--eval_interval", type=int, default=100,
-        help="Interval for evaluating the policy during training"
     )
     parser.add_argument("--seed", type=int, default=0, help="Master seed for reproducibility")
 
