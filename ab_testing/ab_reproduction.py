@@ -36,7 +36,7 @@ class ABTestingReproduction(neat.DefaultReproduction):
     """
 
     def __init__(self, config, reporters, stagnation, rl_policy_path=None,
-                 ab_ratio=0.5, tracking_enabled=True, parent_population=None):
+                ab_ratio=0.5, tracking_enabled=True, parent_population=None):
         """Initialize the A/B testing reproduction module."""
         super().__init__(config, reporters, stagnation)
         self.parent_population = parent_population
@@ -65,6 +65,10 @@ class ABTestingReproduction(neat.DefaultReproduction):
                 'survival_rate': [],
             }
         }
+
+        # Initialize data tracking structures
+        self.mutation_data = {}  # Track mutation fitness data
+        self.ancestors = {}  # Track parent information
 
         # Setup the activation functions
         self.activation_functions = ["sigmoid", "tanh", "abs", "gauss", "identity", "sin", "relu"]
@@ -119,9 +123,6 @@ class ABTestingReproduction(neat.DefaultReproduction):
             # overall average fitness across all individuals
             avg_fit = float(np.mean(species_fitness))
             baseline = (avg_fit, avg_fit, avg_fit)
-            # record the same starting point for both arms
-            # self.stats['rl']['fitness'].append(baseline)
-            # self.stats['standard']['fitness'].append(baseline)
 
         if not remaining_species:
             species.species = {}
@@ -138,6 +139,7 @@ class ABTestingReproduction(neat.DefaultReproduction):
         else:
             fitness_range = fitness_diff
 
+        # MAGIC CLIP
         fitness_range = max(1.0, max_fitness - min_fitness)
 
         for s in remaining_species:
@@ -159,6 +161,9 @@ class ABTestingReproduction(neat.DefaultReproduction):
         # Create the new population
         new_population = {}
         species.species = {}
+
+        # Clear mutation data for this generation
+        self.mutation_data = {}
 
         # Handle reproduction for each species
         for spawn, s in zip(spawn_amounts, remaining_species):
@@ -197,8 +202,6 @@ class ABTestingReproduction(neat.DefaultReproduction):
             repro_cutoff = max(repro_cutoff, 2)  # At least 2 parents
             old_members = old_members[:repro_cutoff]
 
-            mutation_data = {}
-
             # Create offspring
             while spawn > 0:
                 spawn -= 1
@@ -216,21 +219,57 @@ class ABTestingReproduction(neat.DefaultReproduction):
                 child_group = self._assign_competitive_group(parent1_id, parent2_id)
                 self.genome_group[gid] = child_group
 
-                pre_mutation_fitness = None
-                if hasattr(child, 'fitness') and child.fitness is not None:
-                    pre_mutation_fitness = child.fitness
+                # Set pre-mutation fitness through evaluation to make sure we have it
+                pre_mutation_fitness = self.estimate_fitness(child, config, generation)
+                child.fitness = pre_mutation_fitness  # Store on genome
 
                 # Apply mutations based on group
                 if child_group == 'rl':
+                    # Store pre-mutation genome copy for later comparison
+                    pre_mutation_child = self._copy_genome(child)
+
+                    # Apply RL mutation
                     child = self._apply_rl_mutation(child)
+
+                    # Get post-mutation fitness
+                    post_mutation_fitness = child.fitness if hasattr(child, 'fitness') and child.fitness is not None else None
+
+                    # If RL mutation didn't set fitness, evaluate it
+                    if post_mutation_fitness is None:
+                        post_mutation_fitness = self.estimate_fitness(child, config, generation)
+                        child.fitness = post_mutation_fitness  # Store on genome
+
+                    # Record mutation data
+                    self.mutation_data[gid] = {
+                        'pre_mutation_fitness': pre_mutation_fitness,
+                        'post_mutation_fitness': post_mutation_fitness
+                    }
+
+                    if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None and post_mutation_fitness is not None:
+                        self.metrics_tracker.record_mutation_effect(
+                            gid, "rl", pre_mutation_fitness, post_mutation_fitness
+                        )
+
                 else:
+                    # Store pre-mutation genome copy
+                    pre_mutation_child = self._copy_genome(child)
+
+                    # Apply standard mutation
                     child.mutate(config.genome_config)
 
-                    # Record mutation effect if we have pre-mutation fitness
-                    if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None:
-                        # Post-mutation fitness will be set during evaluation
+                    # Evaluate post-mutation fitness
+                    post_mutation_fitness = self.estimate_fitness(child, config, generation)
+                    child.fitness = post_mutation_fitness  # Store on genome
+
+                    # Record mutation data
+                    self.mutation_data[gid] = {
+                        'pre_mutation_fitness': pre_mutation_fitness,
+                        'post_mutation_fitness': post_mutation_fitness
+                    }
+
+                    if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None and post_mutation_fitness is not None:
                         self.metrics_tracker.record_mutation_effect(
-                            gid, "standard", pre_mutation_fitness, None
+                            gid, "standard", pre_mutation_fitness, post_mutation_fitness
                         )
 
                 # Record group assignment and ancestry
@@ -245,9 +284,10 @@ class ABTestingReproduction(neat.DefaultReproduction):
 
         self.logger.info(f"Reproduction complete. New population size: {len(new_population)}")
 
-        # # Only collect group‐specific stats from gen 1 onward
+        # Only collect group‐specific stats from gen 1 onward
         if generation > 0 and self.tracking_enabled and self.parent_population is not None:
             self.parent_population._update_group_stats(generation, new_population)
+
         return new_population
 
     def _assign_random_group(self):
@@ -309,10 +349,19 @@ class ABTestingReproduction(neat.DefaultReproduction):
             if dones[0]:
                 break
 
+        # Set fitness on best genome
+        if best_genome is not None:
+            best_genome.fitness = best_reward
+
         if hasattr(self, 'metrics_tracker') and pre_mutation_fitness is not None and best_genome is not None:
+            # Add best_action to the mutation effect record
             self.metrics_tracker.record_mutation_effect(
-                genome.key, "rl", pre_mutation_fitness, best_reward  # Use the best reward as post-mutation fitness
+                genome.key, "rl", pre_mutation_fitness, best_reward, best_action
             )
+
+            # Store action data in mutation_data for this genome
+            if genome.key in self.mutation_data:
+                self.mutation_data[genome.key]['best_action'] = best_action
 
         # Return the best mutation result
         return best_genome if best_genome is not None else base_env.genome
@@ -324,55 +373,6 @@ class ABTestingReproduction(neat.DefaultReproduction):
         env._reset_bookkeeping()
         env.genome = genome
         return env._get_observation()
-
-    def _assign_competitive_group(self, parent1_id, parent2_id):
-        """
-        Assign group based on competitive fitness of parents.
-
-        Args:
-            parent1_id: ID of first parent
-            parent2_id: ID of second parent
-
-        Returns:
-            Group assignment ('rl' or 'standard')
-        """
-        # Get parent genomes
-        parent1 = self.parent_population.population.get(parent1_id)
-        parent2 = self.parent_population.population.get(parent2_id)
-
-        # Default to random assignment if parents not found
-        if not parent1 or not parent2:
-            return self._assign_random_group()
-
-        # Get parent groups
-        p1_group = self.genome_group.get(parent1_id, self._assign_random_group())
-        p2_group = self.genome_group.get(parent2_id, self._assign_random_group())
-
-        # If both parents have same group, child inherits that group
-        if p1_group == p2_group:
-            return p1_group
-
-        # If parents have different groups, use weighted random based on fitness
-        p1_fitness = parent1.fitness if hasattr(parent1, 'fitness') and parent1.fitness is not None else 0
-        p2_fitness = parent2.fitness if hasattr(parent2, 'fitness') and parent2.fitness is not None else 0
-
-        # Prevent division by zero
-        total_fitness = p1_fitness + p2_fitness
-        if total_fitness <= 0:
-            return self._assign_random_group()
-
-        # Map parent fitness to their group
-        group_weights = {
-            p1_group: p1_fitness / total_fitness,
-            p2_group: p2_fitness / total_fitness
-        }
-
-        # Weighted random choice
-        r = random.random()
-        if r < group_weights[p1_group]:
-            return p1_group
-        else:
-            return p2_group
 
     def _assign_competitive_group(self, parent1_id, parent2_id):
         """
@@ -411,28 +411,42 @@ class ABTestingReproduction(neat.DefaultReproduction):
         p1_fitness = parent1.fitness if hasattr(parent1, 'fitness') and parent1.fitness is not None else 0
         p2_fitness = parent2.fitness if hasattr(parent2, 'fitness') and parent2.fitness is not None else 0
 
-        # Make sure fitness is positive for weighting
-        p1_fitness = max(0, p1_fitness)
-        p2_fitness = max(0, p2_fitness)
+        if p1_fitness >= p2_fitness:
+            return p1_group
+        else:
+            return p2_group
 
-        # Prevent division by zero
-        total_fitness = p1_fitness + p2_fitness
-        if total_fitness <= 0:
-            return self._assign_random_group()
+    def estimate_fitness(self, genome, config, generation):
+        """
+        Evaluate fitness for a single genome.
+        This is a simplified version that calls the fitness evaluator directly.
+        """
+        try:
+            # Setup environment for fitness evaluation
+            from ab_testing.evaluator import GenomeEvaluator
 
-        # Map parent fitness to their group
-        group_weights = {
-            p1_group: p1_fitness / total_fitness,
-            p2_group: p2_fitness / total_fitness
-        }
+            # Call the evaluator on just this genome
+            fitness = GenomeEvaluator.eval_fitness(genome, config, genome.key, generation)
+            return fitness
+        except Exception as e:
+            self.logger.error(f"Error estimating fitness: {e}")
+            # Fall back to parent average if available
+            if hasattr(self, 'ancestors') and genome.key in self.ancestors:
+                parent1_id, parent2_id = self.ancestors[genome.key]
+                parent_fitnesses = []
 
-        # Log the assignment probabilities
-        print(f"Child of parents {parent1_id}({p1_group}, fitness={p1_fitness:.4f}) and {parent2_id}({p2_group}, fitness={p2_fitness:.4f})")
-        print(f"  Group assignment probabilities: {p1_group}={group_weights[p1_group]:.2f}, {p2_group}={group_weights[p2_group]:.2f}")
+                if parent1_id in self.parent_population.population:
+                    p1 = self.parent_population.population[parent1_id]
+                    if hasattr(p1, 'fitness') and p1.fitness is not None:
+                        parent_fitnesses.append(p1.fitness)
 
-        # Weighted random choice
-        r = random.random()
-        chosen_group = p1_group if r < group_weights[p1_group] else p2_group
-        print(f"  Assigned to group: {chosen_group} (r={r:.2f})")
+                if parent2_id in self.parent_population.population:
+                    p2 = self.parent_population.population[parent2_id]
+                    if hasattr(p2, 'fitness') and p2.fitness is not None:
+                        parent_fitnesses.append(p2.fitness)
 
-        return chosen_group
+                if parent_fitnesses:
+                    return sum(parent_fitnesses) / len(parent_fitnesses)
+
+            # Last resort - return a neutral fitness
+            return 0.0

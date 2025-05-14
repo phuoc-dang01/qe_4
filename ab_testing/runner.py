@@ -27,10 +27,6 @@ def run_ab_testing_experiment(args: Any) -> Any:
     print(save_path)
     os.makedirs(save_path, exist_ok=True)
 
-    # Create subdirectories for checkpoints
-    checkpoints_path = os.path.join(save_path, "checkpoints")
-    os.makedirs(checkpoints_path, exist_ok=True)
-
     config.extra_info = {
         "structure_shape": structure_shape,
         "save_path": save_path,
@@ -54,12 +50,6 @@ def run_ab_testing_experiment(args: Any) -> Any:
         rl_policy_path=args.rl_policy_path,
         ab_ratio=args.ab_ratio,
     )
-
-    # Add checkpoint reporter
-    # checkpoint_interval = max(1, args.max_evaluations // (10 * args.pop_size))  # Save ~10 checkpoints
-    # pop.add_reporter(neat.Checkpointer(checkpoint_interval, filename_prefix=f"{checkpoints_path}/neat-checkpoint-"))
-
-    # print(f"Checkpoint interval: every {checkpoint_interval} generations")
 
     max_evaluations = args.max_evaluations
     generations = int(np.ceil(max_evaluations / args.pop_size))

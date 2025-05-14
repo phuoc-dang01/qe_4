@@ -66,7 +66,7 @@ def create_parser():
         help="Evogym environment name (e.g. Walker-v0)"
     )
     parser.add_argument(
-        "--pop_size", type=int, default=10,
+        "--pop_size", type=int, default=4,
         help="Population size for NEAT"
     )
     parser.add_argument(
@@ -74,7 +74,7 @@ def create_parser():
         help="Robot structure shape (height,width)"
     )
     parser.add_argument(
-        "--max_evaluations", type=int, default=100,
+        "--max_evaluations", type=int, default=12,
         help="Maximum total genome evaluations"
     )
     parser.add_argument(

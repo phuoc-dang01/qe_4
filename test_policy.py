@@ -182,45 +182,45 @@ def test_option_critic_model(model, eval_env, num_steps=20):
 
     return history
 
-model_path = "/home/pd468/qe/rl_mutation/models/20250512_2236/final_model.zip"
-args = init_train_args()
-model, eval_env = load_option_critic_model(model_path, args)
+# model_path = "/home/pd468/qe/rl_mutation/models/20250512_2236/final_model.zip"
+# args = init_train_args()
+# model, eval_env = load_option_critic_model(model_path, args)
 
-# Test the model for 50 steps
-history = test_option_critic_model(model, eval_env, num_steps=10)
+# # Test the model for 50 steps
+# history = test_option_critic_model(model, eval_env, num_steps=10)
 
-print("After history:")
-# If you want to visualize the option switches over time
-try:
-    # Set non-interactive backend before importing pyplot
-    import matplotlib
-    matplotlib.use('Agg')  # Use the 'Agg' backend which doesn't require a display
-    import matplotlib.pyplot as plt
+# print("After history:")
+# # If you want to visualize the option switches over time
+# try:
+#     # Set non-interactive backend before importing pyplot
+#     import matplotlib
+#     matplotlib.use('Agg')  # Use the 'Agg' backend which doesn't require a display
+#     import matplotlib.pyplot as plt
 
-    # Extract options from history
-    steps = [record['step'] for record in history]
-    options = [record['option'] for record in history]
-    rewards = [record['reward'] for record in history]
+#     # Extract options from history
+#     steps = [record['step'] for record in history]
+#     options = [record['option'] for record in history]
+#     rewards = [record['reward'] for record in history]
 
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+#     # Create figure with two subplots
+#     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-    # Plot options
-    ax1.plot(steps, options, marker='o', linestyle='-', markersize=8)
-    ax1.set_ylabel('Option')
-    ax1.set_title('Option Selection Over Time')
-    ax1.grid(True)
+#     # Plot options
+#     ax1.plot(steps, options, marker='o', linestyle='-', markersize=8)
+#     ax1.set_ylabel('Option')
+#     ax1.set_title('Option Selection Over Time')
+#     ax1.grid(True)
 
-    # Plot rewards
-    ax2.plot(steps, rewards, marker='x', linestyle='-', color='orange')
-    ax2.set_xlabel('Step')
-    ax2.set_ylabel('Reward')
-    ax2.set_title('Rewards Over Time')
-    ax2.grid(True)
+#     # Plot rewards
+#     ax2.plot(steps, rewards, marker='x', linestyle='-', color='orange')
+#     ax2.set_xlabel('Step')
+#     ax2.set_ylabel('Reward')
+#     ax2.set_title('Rewards Over Time')
+#     ax2.grid(True)
 
-    plt.tight_layout()
-    plt.savefig('option_critic_test.png')
-    plt.close()  # Important: close the figure to free memory
-    print("Created visualization: option_critic_test.png")
-except ImportError:
-    print("Matplotlib not available - skipping visualization")
+#     plt.tight_layout()
+#     plt.savefig('option_critic_test.png')
+#     plt.close()  # Important: close the figure to free memory
+#     print("Created visualization: option_critic_test.png")
+# except ImportError:
+#     print("Matplotlib not available - skipping visualization")

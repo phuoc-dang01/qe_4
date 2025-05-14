@@ -24,7 +24,7 @@ class MetricsTracker:
 
         # Main data structures
         self.genome_history = defaultdict(list)  # Tracks history for each genome
-        self.generation_stats = defaultdict(list)  # Stats per generation
+        self.generation_stats = {}  # Changed from defaultdict(list) to regular dict
         self.mutation_effects = {"rl": [], "standard": []}  # Fitness changes by mutation type
         self.action_effects = defaultdict(list)  # Effects by action type (for RL mutations)
         self.cumulative_improvements = {"rl": 0.0, "standard": 0.0}
@@ -38,6 +38,16 @@ class MetricsTracker:
         """Record data for a single genome."""
         if not hasattr(genome, "fitness") or genome.fitness is None:
             return
+
+        # Try to find mutation effect data if not directly provided
+        if (pre_mutation_fitness is None or post_mutation_fitness is None):
+            # Look for this genome in mutation effects
+            for effect in self.mutation_effects.get(group, []):
+                if effect.get("genome_id") == genome_id:
+                    pre_mutation_fitness = effect.get("pre_fitness")
+                    post_mutation_fitness = effect.get("post_fitness")
+                    break
+
         record = {
             "generation": generation,
             "genome_id": genome_id,
@@ -56,17 +66,27 @@ class MetricsTracker:
         # Track mutation effects if we have before/after data
         if pre_mutation_fitness is not None and post_mutation_fitness is not None:
             improvement = post_mutation_fitness - pre_mutation_fitness
-            self.mutation_effects[group].append({
-                "genome_id": genome_id,
-                "generation": generation,
-                "pre_fitness": pre_mutation_fitness,
-                "post_fitness": post_mutation_fitness,
-                "improvement": improvement
-            })
 
-            # Update cumulative improvements
-            if improvement > 0:
-                self.cumulative_improvements[group] += improvement
+            # Check if this mutation effect is already recorded
+            already_recorded = False
+            for effect in self.mutation_effects.get(group, []):
+                if effect.get("genome_id") == genome_id:
+                    already_recorded = True
+                    break
+
+            if not already_recorded:
+                # This is a new mutation effect - add it to records and update cumulative improvements
+                self.mutation_effects[group].append({
+                    "genome_id": genome_id,
+                    "generation": generation,
+                    "pre_fitness": pre_mutation_fitness,
+                    "post_fitness": post_mutation_fitness,
+                    "improvement": improvement
+                })
+
+                # Only update cumulative improvements for new records with positive improvement
+                if improvement > 0:
+                    self.cumulative_improvements[group] += improvement
 
         # Update peak and worst performance
         if record["fitness"] != -1.0:
@@ -89,27 +109,46 @@ class MetricsTracker:
             return  # Skip if we don't have before/after data
 
         improvement = post_fitness - pre_fitness
-        effect = {
-            "genome_id": genome_id,
-            "pre_fitness": pre_fitness,
-            "post_fitness": post_fitness,
-            "improvement": improvement,
-            "best_action": best_action
-        }
 
-        self.mutation_effects[group].append(effect)
+        # Check if this effect is already recorded
+        already_recorded = False
+        for effect in self.mutation_effects.get(group, []):
+            if effect.get("genome_id") == genome_id:
+                already_recorded = True
+                break
 
-        # Track which actions produce the best results (for RL mutations)
-        if group == "rl" and best_action is not None:
-            action_str = str(best_action)  # Convert the action to a string key
-            self.action_effects[action_str].append({
+        if already_recorded:
+            # If already recorded, just update the existing record - don't add to cumulative
+            for effect in self.mutation_effects[group]:
+                if effect.get("genome_id") == genome_id:
+                    effect["pre_fitness"] = pre_fitness
+                    effect["post_fitness"] = post_fitness
+                    effect["improvement"] = improvement
+                    if group == "rl" and best_action is not None:
+                        effect["best_action"] = best_action
+                    break
+        else:
+            # This is a new effect - add it to records and update cumulative improvements
+            effect = {
                 "genome_id": genome_id,
-                "improvement": improvement
-            })
+                "pre_fitness": pre_fitness,
+                "post_fitness": post_fitness,
+                "improvement": improvement,
+                "best_action": best_action
+            }
+            self.mutation_effects[group].append(effect)
 
-        # Update cumulative improvements (only count positive improvements)
-        if improvement > 0:
-            self.cumulative_improvements[group] += improvement
+            # Track which actions produce the best results (for RL mutations)
+            if group == "rl" and best_action is not None:
+                action_str = str(best_action)  # Convert the action to a string key
+                self.action_effects[action_str].append({
+                    "genome_id": genome_id,
+                    "improvement": improvement
+                })
+
+            # Only update cumulative improvements for new records with positive improvement
+            if improvement > 0:
+                self.cumulative_improvements[group] += improvement
 
     def record_generation_stats(self, generation, population, group_assignments):
         """Record statistics for an entire generation."""
@@ -174,35 +213,58 @@ class MetricsTracker:
 
     def save_metrics(self):
         """Save all tracked metrics to disk."""
-        # Save genome history as jsonl (one line per record for efficiency)
-        with open(os.path.join(self.metrics_dir, "genome_history.jsonl"), "w") as f:
-            for genome_id, records in self.genome_history.items():
-                for record in records:
-                    f.write(json.dumps({"genome_id": genome_id, **record}) + "\n")
+        try:
+            # Helper function to convert NumPy types to Python types
+            def convert_numpy_types(obj):
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {k: convert_numpy_types(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_numpy_types(item) for item in obj]
+                else:
+                    return obj
 
-        # Save generation stats
-        with open(os.path.join(self.metrics_dir, "generation_stats.json"), "w") as f:
-            json.dump(self.generation_stats, f, indent=2)
+            # Save genome history as jsonl (one line per record for efficiency)
+            with open(os.path.join(self.metrics_dir, "genome_history.jsonl"), "w") as f:
+                for genome_id, records in self.genome_history.items():
+                    for record in records:
+                        # Convert record to serializable format
+                        serializable_record = convert_numpy_types({"genome_id": genome_id, **record})
+                        f.write(json.dumps(serializable_record) + "\n")
 
-        # Save mutation effects
-        with open(os.path.join(self.metrics_dir, "mutation_effects.json"), "w") as f:
-            json.dump(self.mutation_effects, f, indent=2)
+            # Save generation stats
+            with open(os.path.join(self.metrics_dir, "generation_stats.json"), "w") as f:
+                json.dump(convert_numpy_types(self.generation_stats), f, indent=2)
 
-        # Save action effects
-        with open(os.path.join(self.metrics_dir, "action_effects.json"), "w") as f:
-            json.dump(dict(self.action_effects), f, indent=2)  # Convert defaultdict to regular dict
+            # Save mutation effects
+            with open(os.path.join(self.metrics_dir, "mutation_effects.json"), "w") as f:
+                json.dump(convert_numpy_types(self.mutation_effects), f, indent=2)
 
-        # Save cumulative improvements
-        with open(os.path.join(self.metrics_dir, "cumulative_improvements.json"), "w") as f:
-            json.dump(self.cumulative_improvements, f, indent=2)
+            # Save action effects
+            with open(os.path.join(self.metrics_dir, "action_effects.json"), "w") as f:
+                json.dump(convert_numpy_types(dict(self.action_effects)), f, indent=2)
 
-        # Save peak performance
-        with open(os.path.join(self.metrics_dir, "peak_performance.json"), "w") as f:
-            json.dump(self.peak_performance, f, indent=2)
+            # Save cumulative improvements
+            with open(os.path.join(self.metrics_dir, "cumulative_improvements.json"), "w") as f:
+                json.dump(convert_numpy_types(self.cumulative_improvements), f, indent=2)
 
-        # Save worst performance
-        with open(os.path.join(self.metrics_dir, "worst_performance.json"), "w") as f:
-            json.dump(self.worst_performance, f, indent=2)
+            # Save peak performance
+            with open(os.path.join(self.metrics_dir, "peak_performance.json"), "w") as f:
+                json.dump(convert_numpy_types(self.peak_performance), f, indent=2)
+
+            # Save worst performance
+            with open(os.path.join(self.metrics_dir, "worst_performance.json"), "w") as f:
+                json.dump(convert_numpy_types(self.worst_performance), f, indent=2)
+
+        except Exception as e:
+            print(f"Error saving metrics: {e}")
+            import traceback
+            traceback.print_exc()
 
     def generate_reports(self):
         """Generate comprehensive reports and visualizations."""
@@ -215,6 +277,33 @@ class MetricsTracker:
 
     def _generate_mutation_effect_report(self):
         """Generate a report showing the effect of mutations."""
+        # Also look through genome history for mutation data
+        for genome_id, records in self.genome_history.items():
+            for record in records:
+                if (record.get("pre_mutation_fitness") is not None and
+                    record.get("post_mutation_fitness") is not None):
+
+                    group = record.get("group")
+                    if group not in ["rl", "standard"]:
+                        continue
+
+                    # Check if this mutation is already recorded
+                    already_recorded = False
+                    for mut in self.mutation_effects.get(group, []):
+                        if mut.get("genome_id") == genome_id:
+                            already_recorded = True
+                            break
+
+                    if not already_recorded:
+                        # Add to mutation effects
+                        mutation = {
+                            "genome_id": genome_id,
+                            "pre_fitness": record.get("pre_mutation_fitness"),
+                            "post_fitness": record.get("post_mutation_fitness"),
+                            "improvement": record.get("post_mutation_fitness") - record.get("pre_mutation_fitness")
+                        }
+                        self.mutation_effects.setdefault(group, []).append(mutation)
+
         if not self.mutation_effects["rl"] and not self.mutation_effects["standard"]:
             return
 
@@ -447,69 +536,89 @@ class MetricsTracker:
         if not self.action_effects:
             return
 
-        # Calculate average improvement for each action
-        action_stats = {}
-        for action, effects in self.action_effects.items():
-            improvements = [e["improvement"] for e in effects]
-            action_stats[action] = {
-                "count": len(improvements),
-                "mean_improvement": np.mean(improvements),
-                "positive_rate": np.mean([i > 0 for i in improvements]),
-                "total_improvement": sum(improvements)
-            }
+        try:
+            # Calculate average improvement for each action
+            action_stats = {}
+            for action, effects in self.action_effects.items():
+                if not effects:  # Skip empty lists
+                    continue
 
-        # Sort actions by average improvement
-        sorted_actions = sorted(action_stats.items(), key=lambda x: x[1]["mean_improvement"], reverse=True)
+                improvements = [float(e["improvement"]) for e in effects if "improvement" in e]
+                if not improvements:  # Skip if no improvements
+                    continue
 
-        # Plot results
-        plt.figure(figsize=(12, 8))
+                action_stats[action] = {
+                    "count": len(improvements),
+                    "mean_improvement": float(np.mean(improvements)),
+                    "positive_rate": float(np.mean([i > 0 for i in improvements])),
+                    "total_improvement": float(sum(improvements))
+                }
 
-        # Mean improvement by action
-        plt.subplot(2, 1, 1)
-        actions = [a[0] for a in sorted_actions]
-        means = [a[1]["mean_improvement"] for a in sorted_actions]
-        counts = [a[1]["count"] for a in sorted_actions]
+            if not action_stats:  # If no valid actions, return
+                return
 
-        # Use count for sizing the bars
-        max_count = max(counts)
-        normalized_counts = [0.3 + 0.7 * (c / max_count) for c in counts]
+            # Sort actions by average improvement
+            sorted_actions = sorted(action_stats.items(), key=lambda x: x[1]["mean_improvement"], reverse=True)
 
-        bars = plt.bar(range(len(actions)), means, width=normalized_counts)
+            # Plot results
+            plt.figure(figsize=(12, 8))
 
-        # Add count annotations
-        for i, bar in enumerate(bars):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f"n={counts[i]}", ha='center', va='bottom', fontsize=8)
+            # Mean improvement by action
+            plt.subplot(2, 1, 1)
+            actions = [str(a[0]) for a in sorted_actions]  # Convert to string to ensure it's safe
+            means = [a[1]["mean_improvement"] for a in sorted_actions]
+            counts = [a[1]["count"] for a in sorted_actions]
 
-        plt.xlabel("Action")
-        plt.ylabel("Mean Fitness Improvement")
-        plt.title("Mean Fitness Improvement by Action")
-        plt.xticks(range(len(actions)), actions, rotation=45, ha="right")
+            # Safety check
+            if not actions or not means or not counts:
+                return
 
-        # Positive improvement rate by action
-        plt.subplot(2, 1, 2)
-        positive_rates = [a[1]["positive_rate"] * 100 for a in sorted_actions]
-        plt.bar(range(len(actions)), positive_rates)
-        plt.xlabel("Action")
-        plt.ylabel("Positive Improvement Rate (%)")
-        plt.title("Rate of Positive Improvements by Action")
-        plt.xticks(range(len(actions)), actions, rotation=45, ha="right")
+            # Use count for sizing the bars
+            max_count = max(counts)
+            if max_count <= 0:
+                max_count = 1  # Avoid division by zero
+            normalized_counts = [0.3 + 0.7 * (c / max_count) for c in counts]
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.metrics_dir, "action_analysis.png"))
-        plt.close()
+            bars = plt.bar(range(len(actions)), means, width=normalized_counts)
 
-        # Save detailed stats
-        with open(os.path.join(self.metrics_dir, "action_analysis.txt"), "w") as f:
-            f.write("Action Analysis:\n")
-            f.write("=" * 50 + "\n\n")
+            # Add count annotations
+            for i, bar in enumerate(bars):
+                plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f"n={counts[i]}", ha='center', va='bottom', fontsize=8)
 
-            for action, stats in sorted_actions:
-                f.write(f"Action: {action}\n")
-                f.write(f"  Count: {stats['count']}\n")
-                f.write(f"  Mean Improvement: {stats['mean_improvement']:.4f}\n")
-                f.write(f"  Positive Rate: {stats['positive_rate']*100:.1f}%\n")
-                f.write(f"  Total Improvement: {stats['total_improvement']:.4f}\n\n")
+            plt.xlabel("Action")
+            plt.ylabel("Mean Fitness Improvement")
+            plt.title("Mean Fitness Improvement by Action")
+            plt.xticks(range(len(actions)), actions, rotation=45, ha="right")
+
+            # Positive improvement rate by action
+            plt.subplot(2, 1, 2)
+            positive_rates = [a[1]["positive_rate"] * 100 for a in sorted_actions]
+            plt.bar(range(len(actions)), positive_rates)
+            plt.xlabel("Action")
+            plt.ylabel("Positive Improvement Rate (%)")
+            plt.title("Rate of Positive Improvements by Action")
+            plt.xticks(range(len(actions)), actions, rotation=45, ha="right")
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.metrics_dir, "action_analysis.png"))
+            plt.close()
+
+            # Save detailed stats
+            with open(os.path.join(self.metrics_dir, "action_analysis.txt"), "w") as f:
+                f.write("Action Analysis:\n")
+                f.write("=" * 50 + "\n\n")
+
+                for action, stats in sorted_actions:
+                    f.write(f"Action: {str(action)}\n")
+                    f.write(f"  Count: {stats['count']}\n")
+                    f.write(f"  Mean Improvement: {stats['mean_improvement']:.4f}\n")
+                    f.write(f"  Positive Rate: {stats['positive_rate']*100:.1f}%\n")
+                    f.write(f"  Total Improvement: {stats['total_improvement']:.4f}\n\n")
+        except Exception as e:
+            print(f"Error generating action analysis: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _generate_summary_report(self):
         """Generate an overall summary report."""

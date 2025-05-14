@@ -33,6 +33,12 @@ class ABTestingPopulation(neat.Population):
         # Share the metrics tracker with reproduction
         self.reproduction.metrics_tracker = self.metrics_tracker
 
+        # Initialize the ancestors dictionary in reproduction
+        self.reproduction.ancestors = {}
+
+        # Initialize mutation data dictionary
+        self.reproduction.mutation_data = {}
+
         # Add AB testing reporter
         self.ab_reporter = ABTestingReporter(self.reproduction, config.extra_info['save_path'], report_interval=1)
         self.add_reporter(self.ab_reporter)
@@ -140,41 +146,8 @@ class ABTestingPopulation(neat.Population):
 
             # Evaluate all genomes using the user-provided function.
             fitness_function(list(self.population.items()), self.config, self.generation)
-            # self._update_group_stats(self.generation, self.population)
 
-            # genomes_to_evaluate = []
-            # for genome_id, genome in self.population.items():
-            #     needs_evaluation = True
-            #     # If genome already has valid fitness, skip evaluation
-            #     if hasattr(genome, 'fitness') and genome.fitness is not None and np.isfinite(genome.fitness):
-            #         needs_evaluation = False
-
-            #     # Check structure hash cache if available
-            #     if needs_evaluation and hasattr(self.config, 'extra_info') and 'structure_hashes' in self.config.extra_info:
-            #         # Generate robot from genome
-            #         from .robot_gen import CPPNRobotGenerator
-            #         robot = CPPNRobotGenerator.get_robot_from_genome(genome, self.config)
-
-            #         # Check if this structure has been seen before
-            #         from evogym import hashable
-            #         robot_hash = hashable(robot)
-            #         if robot_hash in self.config.extra_info["structure_hashes"]:
-            #             cached_fitness = self.config.extra_info["structure_hashes"][robot_hash]
-            #             if cached_fitness is not True:  # True means it was seen but not evaluated yet
-            #                 genome.fitness = cached_fitness
-            #                 needs_evaluation = False
-            #                 print(f"   [CACHE HIT] Reusing fitness {cached_fitness:.5f} for genome {genome_id}")
-
-            #     if needs_evaluation:
-            #         genomes_to_evaluate.append((genome_id, genome))
-
-            # if genomes_to_evaluate:
-            #     print(f"Evaluating {len(genomes_to_evaluate)} out of {len(self.population)} genomes")
-            #     fitness_function(genomes_to_evaluate, self.config, self.generation)
-            # else:
-            #     print("All genomes have cached fitness values - skipping evaluation")
-
-            # # Record metrics for this generation
+            # Record metrics for this generation
             self.metrics_tracker.record_generation_stats(
                 self.generation,
                 self.population,
@@ -185,6 +158,16 @@ class ABTestingPopulation(neat.Population):
             for genome_id, genome in self.population.items():
                 group = self.reproduction.genome_group.get(genome_id, 'unknown')
                 parent_ids = self.reproduction.ancestors.get(genome_id, (None, None))
+
+                pre_mutation_fitness = None
+                post_mutation_fitness = None
+
+                # Check if we have mutation data for this genome
+                if hasattr(self.reproduction, 'mutation_data') and genome_id in self.reproduction.mutation_data:
+                    mutation_data = self.reproduction.mutation_data[genome_id]
+                    pre_mutation_fitness = mutation_data.get('pre_mutation_fitness')
+                    post_mutation_fitness = mutation_data.get('post_mutation_fitness')
+
                 self.metrics_tracker.record_genome(
                     self.generation,
                     genome_id,
