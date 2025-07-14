@@ -12,7 +12,7 @@ def create_ppo_eval_args():
         n_epochs       = 4,      # few passes over each rollout to avoid stale‐data overfit
         # ——————————————————————————————————————————————————————
         # Total interaction budget per genome
-        total_timesteps= 1000,    # only 100 steps—fitness is noisy but cheap
+        total_timesteps= 100,    # only 100 steps—fitness is noisy but cheap
         # ——————————————————————————————————————————————————————
         # Quick self‐evaluation
         eval_interval  = 100,     # log every 25 steps (optional)

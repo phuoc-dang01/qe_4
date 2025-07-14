@@ -9,11 +9,19 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # ↑ 3 levels: fitness → rl_mutation → qe
 sys.path.insert(0, str(PROJECT_ROOT))
-evogym_path = PROJECT_ROOT / 'evogym'
-if evogym_path.exists():
-    sys.path.insert(0, str(evogym_path / 'examples' / 'ppo'))
-    sys.path.insert(0, str(evogym_path / 'examples' / 'externals' / 'PyTorch-NEAT'))
+evogym_root = PROJECT_ROOT / 'evogym'
+if evogym_root.exists():
+    sys.path.insert(0, str(evogym_root))  # For 'import evogym'
+    sys.path.insert(0, str(evogym_root / 'examples' / 'ppo'))
+    sys.path.insert(0, str(evogym_root / 'examples' / 'externals' / 'PyTorch-NEAT'))
+    print(f"✓ Added evogym paths: {evogym_root}")
+else:
+    print(f"✗ evogym directory not found at: {evogym_root}")
 
+
+print("Python paths:")
+for i, path in enumerate(sys.path[:5]):  # Show first 5 paths
+    print(f"  {i}: {path}")
 
 
 import pdb

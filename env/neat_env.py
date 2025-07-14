@@ -18,7 +18,7 @@ class DummyEvaluator:
 class NeatMutationEnv(gym.Env):
     ADD_NODE, DELETE_NODE, ADD_CONNECTION, DELETE_CONNECTION, MODIFY_WEIGHT, MODIFY_BIAS = range(6)
 
-    def __init__(self, config, evaluator_type: str = "dummy"):
+    def __init__(self, config, evaluator_type: str = "full"):
         """
         Initialize NEAT mutation environment.
 

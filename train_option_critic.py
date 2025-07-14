@@ -44,8 +44,9 @@ def make_vec_env(env_fn, n_envs: int = 1):
 def setup_neat_config(args):
     """Create and configure the NEAT configuration."""
     config_path = os.path.join(os.path.dirname(__file__), 'neat.cfg')
-    import ppo_evaluation_args
-    ppo_args = ppo_evaluation_args.create_ppo_eval_args()
+    # import ppo_evaluation_args
+    # ppo_args = ppo_evaluation_args.create_ppo_eval_args()
+    ppo_args = None
     config = neat.Config(
         neat.DefaultGenome,
         neat.DefaultReproduction,
@@ -122,55 +123,92 @@ def setup_callbacks(args, eval_env):
     # return CallbackList([checkpoint_callback, eval_callback, neat_metrics, option_metrics, wandb_cb])
     return CallbackList([checkpoint_callback, eval_callback, wandb_cb, neat_metrics])
 
-def train_option_critic(args):
+def train_option_critic_quick():
+    """Streamlined training for quick testing."""
+    args = get_quick_test_args()
+
+    print("=" * 60)
+    print("QUICK OPTION-CRITIC TRAINING")
+    print("=" * 60)
+    print(f"Total timesteps: {args.total_timesteps}")
+    print(f"Save directory: {args.save_dir}")
+    print(f"Environments: {args.n_envs}")
+
     # Initialize W&B
     wandb.init(
         project=args.wandb_project,
-        name=f"{args.env_name}_options{args.num_options}",
+        name=f"quick_test_{datetime.now().strftime('%H%M')}",
         config=vars(args),
-        sync_tensorboard=True  # Add this line to sync tensorboard logs
+        sync_tensorboard=True
     )
+
     # NEAT config
     neat_config = setup_neat_config(args)
 
-    # Create training envs
+    # Create training environment (simple setup)
     raw_env = NeatMutationEnv(neat_config)
     secondary_dims = [space.n for space in raw_env.action_spaces_consequences]
     raw_env.close()
 
-    log_dir = os.path.join(args.save_dir, 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-
-
-    env_fn = lambda: Monitor(NeatMutationEnv(neat_config), os.path.join(log_dir, 'train'))
+    # Training environment
+    env_fn = lambda: Monitor(NeatMutationEnv(neat_config))
     train_env = make_vec_env(env_fn, args.n_envs)
-    train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True, clip_reward=RewardConst.CLIP_REWARD)
+    train_env = VecNormalize(train_env, norm_obs=True, norm_reward=False)
 
-    # Eval env
-    eval_env_fn = lambda: Monitor(NeatMutationEnv(neat_config), os.path.join(log_dir, 'eval'))
-    eval_env = make_vec_env(eval_env_fn, 1)
-    eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
-
-    # Instantiate model
+    # Create model
     model = create_option_critic_model(train_env, secondary_dims, args)
 
-    # Configure logger (stdout + tensorboard)
-    new_logger = configure(os.path.join(args.save_dir, 'tensorboard'), ['stdout', 'tensorboard'])
-    model.set_logger(new_logger)
+    # Simple logging
+    logger = configure(os.path.join(args.save_dir, 'logs'), ['stdout', 'tensorboard'])
+    model.set_logger(logger)
 
-    # Setup callbacks
-    callbacks = setup_callbacks(args, eval_env)
+    # Minimal callbacks - just W&B
+    wandb_cb = WandbCallback(
+        model_save_path=os.path.join(args.save_dir, 'wandb_models'),
+        verbose=1,
+    )
+
+    print("\nStarting training...")
 
     # Train
     model.learn(
         total_timesteps=args.total_timesteps,
-        callback=callbacks
+        callback=wandb_cb,
+        progress_bar=True
     )
 
-    # Save final
-    train_env.save(os.path.join(args.save_dir, 'vecnormalize.pkl'))
-    model.save(os.path.join(args.save_dir, 'final_model'))
+    print("\nTraining completed! Saving model...")
+
+    # Save using our clean method
+    model_path = save_model_properly(model, args.save_dir)
+
+    print(f"\n✓ All done!")
+    print(f"✓ Model saved to: {model_path}")
+    print(f"✓ Directory: {args.save_dir}")
+
+    # Cleanup
     wandb.finish()
+    train_env.close()
+
+    return model_path, args.save_dir
+
+
+def save_model_properly(model, save_dir, model_name="final_model"):
+    """Save model and VecNormalize separately using SB3's methods."""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Save the model
+    model_path = os.path.join(save_dir, model_name)
+    model.save(model_path)  # This creates final_model.zip
+    print(f"✓ Model saved to: {model_path}.zip")
+
+    # Save VecNormalize if you're using it
+    if hasattr(model, 'env') and hasattr(model.env, 'save'):
+        vecnorm_path = os.path.join(save_dir, 'vecnormalize.pkl')
+        model.env.save(vecnorm_path)
+        print(f"✓ VecNormalize saved to: {vecnorm_path}")
+
+    return f"{model_path}.zip"
 
 def init_train_args():
     """Initialize the argument parser."""
@@ -206,6 +244,47 @@ def init_train_args():
     return args
 
 
+def get_quick_test_args():
+    """Get minimal args for quick testing."""
+    parser = argparse.ArgumentParser()
+
+    # Minimal training parameters
+    parser.add_argument('--n_envs', type=int, default=2)  # Small for testing
+    parser.add_argument('--total_timesteps', type=int, default=500)  # Very short
+
+    parser.add_argument('--n_steps', type=int, default=16)  # Small buffer
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--n_epochs', type=int, default=2)  # Quick epochs
+
+    parser.add_argument('--eval_interval', type=int, default=100)  # Frequent eval
+    parser.add_argument('--n_eval_episodes', type=int, default=1)  # Minimal eval
+    parser.add_argument('--save_interval', type=int, default=200)  # Frequent saves
+
+    # Standard RL parameters
+    parser.add_argument('--num_options', type=int, default=6)
+    parser.add_argument('--termination_reg', type=float, default=0.02)
+    parser.add_argument('--entropy_reg', type=float, default=0.02)
+    parser.add_argument('--learning_rate', type=float, default=3e-4)
+    parser.add_argument('--gamma', type=float, default=0.9)
+    parser.add_argument('--gae_lambda', type=float, default=0.8)
+    parser.add_argument('--clip_range', type=float, default=0.1)
+
+    # Paths
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    parser.add_argument('--save_dir', type=str, default=f'./models/quick_test_{timestamp}')
+    parser.add_argument('--structure_shape', type=tuple, default=(5,5))
+    parser.add_argument('--env_name', type=str, default='Walker-v0')
+
+    # W&B
+    parser.add_argument('--wandb_project', type=str, default='QuickTest-OptionCritic')
+
+    args = parser.parse_args([])  # Empty args for defaults
+    return args
+
+
 if __name__ == '__main__':
-    args = init_train_args()
-    train_option_critic(args)
+    model_path, save_dir = train_option_critic_quick()
+
+    print(f"\nNext steps:")
+    print(f"1. Update test_policy.py with model path: {model_path}")
+    print(f"2. Run integration test")

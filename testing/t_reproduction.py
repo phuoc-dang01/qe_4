@@ -40,7 +40,7 @@ class TTestingReproduction(neat.DefaultReproduction):
         """Initialize the A/B testing reproduction module."""
         super().__init__(config, reporters, stagnation)
         self.rl_policy_path = rl_policy_path
-        self.logger = setup_logger('ab_testing')
+        self.logger = setup_logger('t_testing')
         # Load the RL policy
         self.rl_model, self.eval_env = self.load_rl_policy(self.rl_policy_path)
         self.rl_policy = self.rl_model.policy
@@ -54,9 +54,12 @@ class TTestingReproduction(neat.DefaultReproduction):
         self.generation = 0
 
     def load_rl_policy(self, policy_path):
+        print(f"[DEBUG] load_rl_policy called with policy_path: {policy_path}")
         from test_policy import load_option_critic_model
         args = init_train_args()
-        return load_option_critic_model(policy_path, args)
+        result = load_option_critic_model(policy_path, args)
+        print(f"[DEBUG] load_option_critic_model returned successfully")
+        return result
 
     def reproduce(self, config, species, pop_size, generation):
         """
@@ -165,54 +168,41 @@ class TTestingReproduction(neat.DefaultReproduction):
         return new_population
 
     def _apply_rl_mutation(self, genome):
-        """Apply RL-guided mutations with proper environment handling."""
-        print(f"[RL_MUTATE] Genome: {genome.key}")
+        print(f"[DEBUG] _apply_rl_mutation called for genome {genome.key}")
+        # Reset environment
+        obs = self.eval_env.reset()
+        inner_vec = getattr(self.eval_env, 'venv', self.eval_env)
+        wrapped = inner_vec.envs[0]
+        base_env = wrapped.unwrapped
 
-        # Create a fresh environment instance for this genome
-        temp_config = copy.deepcopy(self.eval_env.get_attr('config')[0])
-        temp_env = NeatMutationEnv(temp_config)
-
-        # Set the genome and reset properly
-        temp_env.genome = copy.deepcopy(genome)
-        obs = temp_env.reset()[0]  # Get initial observation
+        # Inject genome into environment
+        base_env.genome = genome
 
         best_reward = float('-inf')
-        best_genome = copy.deepcopy(genome)
+        best_genome = self._copy_genome(genome)
 
-        # Run multiple mutation episodes (not just 3 steps)
-        for episode in range(2):  # Multiple episodes for robustness
-            episode_best_reward = float('-inf')
-            episode_best_genome = copy.deepcopy(temp_env.genome)
+        # Perform RL-guided mutations
+        for step in range(3):
+            actions, _ = self.rl_model.predict(obs, deterministic=True)
 
-            for step in range(5):  # More steps per episode
-                # Use the loaded RL policy
-                obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
-                with torch.no_grad():
-                    actions, _ = self.rl_model.policy.predict(obs_tensor, deterministic=False)
+            action = actions[0]
+            print(f"[RL_MUTATE] Step {step+1}: action={actions[0]}")
+            obs, rewards, dones, infos = self.eval_env.step(actions)
 
-                obs, reward, done, truncated, info = temp_env.step(actions[0])
+            # Check if this mutation result is better than previous best
+            current_reward = rewards[0]
+            print(f"    reward={current_reward:.4f}, done={dones[0]}")
 
-                print(f"    Episode {episode+1}, Step {step+1}: action={actions[0]}, reward={reward:.4f}")
+            # If this is the best result so far, save it
+            if current_reward > best_reward:
+                best_reward = current_reward
+                # Create a deep copy of the current genome
+                best_genome = self._copy_genome(base_env.genome)
 
-                # Track best result in this episode
-                if reward > episode_best_reward:
-                    episode_best_reward = reward
-                    episode_best_genome = copy.deepcopy(temp_env.genome)
+            if dones[0]:
+                break
 
-                if done or truncated:
-                    obs = temp_env.reset()[0]
-                    break
-
-            # Update global best
-            if episode_best_reward > best_reward:
-                best_reward = episode_best_reward
-                best_genome = episode_best_genome
-
-            # Reset for next episode
-            temp_env.genome = copy.deepcopy(genome)
-            obs = temp_env.reset()[0]
-
-        temp_env.close()
+        # Return only the genome, not the tuple
         return best_genome
 
     def _copy_genome(self, genome):
