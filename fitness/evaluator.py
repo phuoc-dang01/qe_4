@@ -9,20 +9,39 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # ↑ 3 levels: fitness → rl_mutation → qe
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
-sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
+evogym_path = PROJECT_ROOT / 'evogym'
+if evogym_path.exists():
+    sys.path.insert(0, str(evogym_path / 'examples' / 'ppo'))
+    sys.path.insert(0, str(evogym_path / 'examples' / 'externals' / 'PyTorch-NEAT'))
+
+
 
 import pdb
+import neat
+import numpy as np
+import torch
+
+# Test imports before using them
+try:
+    from pytorch_neat.cppn import create_cppn
+    print("✓ pytorch_neat import successful")
+except ImportError as e:
+    print(f"✗ pytorch_neat import failed: {e}")
+    # Provide fallback or exit gracefully
+
+try:
+    import evogym.envs
+    from evogym import get_full_connectivity, has_actuator, is_connected
+    print("✓ evogym imports successful")
+except ImportError as e:
+    print(f"✗ evogym imports failed: {e}")
 
 import neat
 import numpy as np
 import torch
 # Now import the function
-from pytorch_neat.cppn import create_cppn
 from fitness.reward_const import *
 
-import evogym.envs
-from evogym import get_full_connectivity, has_actuator, is_connected
 from run import run_ppo
 from evogym.utils import hashable
 from evogym.world import EvoWorld

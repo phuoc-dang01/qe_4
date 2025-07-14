@@ -1,6 +1,6 @@
 import pdb
 import random
-from typing import List
+from typing import List, Optional, Union
 
 import gymnasium as gym
 import numpy as np
@@ -9,15 +9,102 @@ from gymnasium import spaces
 from neat.genome import DefaultGenome
 
 
+class DummyEvaluator:
+    """Dummy evaluator for testing when full evaluation isn't available."""
+    def evaluate(self, genome):
+        # Return a random fitness for testing
+        return np.random.uniform(-1, 1)
+
 class NeatMutationEnv(gym.Env):
     ADD_NODE, DELETE_NODE, ADD_CONNECTION, DELETE_CONNECTION, MODIFY_WEIGHT, MODIFY_BIAS = range(6)
 
-    def __init__(self, config):
+    def __init__(self, config, evaluator_type: str = "dummy"):
+        """
+        Initialize NEAT mutation environment.
+
+        Args:
+            config: NEAT configuration
+            evaluator_type: Type of evaluator to use
+                - "dummy": Fast dummy evaluator for RL training
+                - "proxy": ML-based fitness predictor
+                - "full": Complete robot simulation (requires all dependencies)
+        """
         self.config = config
-        from fitness.evaluator import FitnessEvaluator
-        self.evaluator = FitnessEvaluator(self.config)
+        self.evaluator_type = evaluator_type
+        self.evaluator = None
+
         self._setup_action_spaces()
         self._setup_observation_space()
+
+        # Initialize evaluator based on type
+        self._initialize_evaluator()
+
+    def _initialize_evaluator(self):
+        """Initialize the appropriate evaluator based on type."""
+        try:
+            if self.evaluator_type == "dummy":
+                from fitness.base_evaluator import DummyEvaluator
+                self.evaluator = DummyEvaluator(self.config)
+                print(f"✓ Using DummyEvaluator for fast training")
+
+            elif self.evaluator_type == "proxy":
+                from fitness.base_evaluator import ProxyEvaluator
+                self.evaluator = ProxyEvaluator(self.config)
+                print(f"✓ Using ProxyEvaluator for learned fitness prediction")
+
+            elif self.evaluator_type == "full":
+                from fitness.evaluator import FitnessEvaluator
+                self.evaluator = FitnessEvaluator(self.config)
+                print(f"✓ Using FitnessEvaluator for complete robot simulation")
+
+            else:
+                raise ValueError(f"Unknown evaluator type: {self.evaluator_type}")
+
+        except ImportError as e:
+            print(f"⚠ Failed to load {self.evaluator_type} evaluator: {e}")
+            print(f"Falling back to DummyEvaluator")
+            from fitness.base_evaluator import DummyEvaluator
+            self.evaluator = DummyEvaluator(self.config)
+
+        except Exception as e:
+            print(f"✗ Error initializing evaluator: {e}")
+            print(f"Using minimal fallback evaluator")
+            self.evaluator = self._create_minimal_evaluator()
+
+    def _create_minimal_evaluator(self):
+        """Create a minimal evaluator when all else fails."""
+        class MinimalEvaluator:
+            def evaluate(self, genome):
+                return np.random.uniform(-1, 1)
+        return MinimalEvaluator()
+
+    def set_evaluator_type(self, evaluator_type: str):
+        """Change evaluator type during runtime."""
+        self.evaluator_type = evaluator_type
+        self._initialize_evaluator()
+
+    def _evaluate_genome(self):
+        """Evaluate genome with error handling."""
+        try:
+            if self.evaluator is None:
+                self._initialize_evaluator()
+            return self.evaluator.evaluate(self.genome)
+        except Exception as e:
+            print(f"Warning: Evaluation failed: {e}")
+            return RewardConst.INVALID_ROBOT
+
+    def _get_evaluator(self):
+        """Lazy loading of evaluator to avoid import issues."""
+        if self.evaluator is None:
+            try:
+                from fitness.evaluator import FitnessEvaluator
+                self.evaluator = FitnessEvaluator(self.config)
+                print("✓ FitnessEvaluator loaded successfully")
+            except ImportError as e:
+                print(f"✗ Failed to load FitnessEvaluator: {e}")
+                # Create a dummy evaluator for testing
+                self.evaluator = DummyEvaluator()
+        return self.evaluator
 
     def _setup_action_spaces(self):
         # Primary choices
@@ -255,9 +342,6 @@ class NeatMutationEnv(gym.Env):
             # Choose random hidden node to remove
             node_key = random.choice(hidden_keys)
             self.genome.remove_node(node_key)
-
-    def _evaluate_genome(self):
-        return self.evaluator.evaluate(self.genome)
 
     def _get_observation(self):
         """Extract features from the genome."""

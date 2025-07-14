@@ -58,7 +58,6 @@ class TTestingReproduction(neat.DefaultReproduction):
         args = init_train_args()
         return load_option_critic_model(policy_path, args)
 
-
     def reproduce(self, config, species, pop_size, generation):
         """
         Reproduce using either RL-guided or standard mutations based on A/B testing.
@@ -165,42 +164,55 @@ class TTestingReproduction(neat.DefaultReproduction):
         self.logger.info(f"Reproduction complete. New population size: {len(new_population)}")
         return new_population
 
-
     def _apply_rl_mutation(self, genome):
+        """Apply RL-guided mutations with proper environment handling."""
         print(f"[RL_MUTATE] Genome: {genome.key}")
-        # Reset environment
-        obs = self.eval_env.reset()
-        inner_vec = getattr(self.eval_env, 'venv', self.eval_env)
-        wrapped = inner_vec.envs[0]
-        base_env = wrapped.unwrapped
 
-        # Inject genome into environment
-        base_env.genome = genome
+        # Create a fresh environment instance for this genome
+        temp_config = copy.deepcopy(self.eval_env.get_attr('config')[0])
+        temp_env = NeatMutationEnv(temp_config)
+
+        # Set the genome and reset properly
+        temp_env.genome = copy.deepcopy(genome)
+        obs = temp_env.reset()[0]  # Get initial observation
 
         best_reward = float('-inf')
-        best_genome = self._copy_genome(genome)
+        best_genome = copy.deepcopy(genome)
 
-        # Perform RL-guided mutations
-        for step in range(3):
-            actions, _ = self.rl_model.predict(obs, deterministic=True)
-            action = actions[0]
-            print(f"[RL_MUTATE] Step {step+1}: action={actions[0]}")
-            obs, rewards, dones, infos = self.eval_env.step(actions)
+        # Run multiple mutation episodes (not just 3 steps)
+        for episode in range(2):  # Multiple episodes for robustness
+            episode_best_reward = float('-inf')
+            episode_best_genome = copy.deepcopy(temp_env.genome)
 
-            # Check if this mutation result is better than previous best
-            current_reward = rewards[0]
-            print(f"    reward={current_reward:.4f}, done={dones[0]}")
+            for step in range(5):  # More steps per episode
+                # Use the loaded RL policy
+                obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
+                with torch.no_grad():
+                    actions, _ = self.rl_model.policy.predict(obs_tensor, deterministic=False)
 
-            # If this is the best result so far, save it
-            if current_reward > best_reward:
-                best_reward = current_reward
-                # Create a deep copy of the current genome
-                best_genome = self._copy_genome(base_env.genome)
+                obs, reward, done, truncated, info = temp_env.step(actions[0])
 
-            if dones[0]:
-                break
+                print(f"    Episode {episode+1}, Step {step+1}: action={actions[0]}, reward={reward:.4f}")
 
-        # Return only the genome, not the tuple
+                # Track best result in this episode
+                if reward > episode_best_reward:
+                    episode_best_reward = reward
+                    episode_best_genome = copy.deepcopy(temp_env.genome)
+
+                if done or truncated:
+                    obs = temp_env.reset()[0]
+                    break
+
+            # Update global best
+            if episode_best_reward > best_reward:
+                best_reward = episode_best_reward
+                best_genome = episode_best_genome
+
+            # Reset for next episode
+            temp_env.genome = copy.deepcopy(genome)
+            obs = temp_env.reset()[0]
+
+        temp_env.close()
         return best_genome
 
     def _copy_genome(self, genome):

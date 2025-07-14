@@ -62,7 +62,7 @@ wandb.init(
 )
 
 # 2) Create and wrap environment for logging
-env = DummyVecEnv([lambda: Monitor(NeatMutationEnv(neat_config), filename=None)])
+env = DummyVecEnv([lambda: Monitor(NeatMutationEnv(neat_config, evaluator_type="dummy"), filename=None)])
 
 # 3) Instantiate the Option-Critic PPO model
 model = OptionCriticPPO(
