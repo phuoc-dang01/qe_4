@@ -2,11 +2,14 @@
 import os
 from typing import List, Optional
 
-import gym
+import gymnasium as gym
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
+
+import evogym.envs
+from evogym.envs import *
 
 
 class TEvalCallback(BaseCallback):
@@ -54,35 +57,32 @@ class TEvalCallback(BaseCallback):
         self._validate_and_save()
 
     def _validate_and_save(self) -> None:
-        """
-        Simplified evaluation function that uses a single environment.
-        """
         rewards = []
         for _ in range(self.n_evals):
-            # Create a single environment for evaluation
             env_kwargs = {'body': self.body, 'connections': self.connections}
             env = gym.make(self.env_name, **env_kwargs)
             env = Monitor(env)
 
-            # Reset environment
-            obs = env.reset()
+            # ✅ CORRECT UNPACK for Gymnasium
+            obs, _ = env.reset()
+
             done = False
             total_reward = 0
 
-            # Run one episode
             while not done:
+                # Predict using just obs (ndarray)
                 action, _ = self.model.predict(obs, deterministic=True)
-                obs, reward, done, _ = env.step(action)
+                obs, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
                 total_reward += reward
+                print(f"Step reward: {reward:.4f}, total: {total_reward:.4f}")
 
             rewards.append(total_reward)
             env.close()
 
-        # Calculate statistics
         mean_reward = np.mean(rewards).item()
         out = f"[{self.model_save_name}] Mean: {mean_reward:.3f}, Std: {np.std(rewards):.3f}, Min: {np.min(rewards):.3f}, Max: {np.max(rewards):.3f}"
 
-        # Save model if better than previous best
         if mean_reward > self.best_reward:
             out += f" NEW BEST ({mean_reward:.3f} > {self.best_reward:.3f})"
             self.best_reward = mean_reward
@@ -90,3 +90,4 @@ class TEvalCallback(BaseCallback):
 
         if self.verbose > 0:
             print(out)
+
