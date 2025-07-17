@@ -38,14 +38,13 @@ def run_ppo(
     """
     print(f"Starting run_ppo for genome {model_save_name}, environment {env_name}")
 
-    # Create a single environment
-    env_kwargs = {
-        'body': body,
-        'connections': connections,
-    }
-
     try:
-        # Create the environment directly
+        # Create a single environment
+        env_kwargs = {
+            'body': body,
+            'connections': connections,
+        }
+
         print(f"Creating environment {env_name}...")
         base_env = gym.make(env_name, **env_kwargs)
         monitored_env = Monitor(base_env)
@@ -72,7 +71,7 @@ def run_ppo(
         model = PPO(
             "MlpPolicy",
             vec_env,
-            verbose=args.verbose_ppo,
+            verbose=0,  # Reduce verbosity to minimize output
             learning_rate=args.learning_rate,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
@@ -86,19 +85,22 @@ def run_ppo(
             seed=seed
         )
 
-        # Reduce timesteps if needed for faster evaluation
-        actual_timesteps = args.total_timesteps
-
-        print(f"Starting PPO training for {actual_timesteps} steps...")
+        print(f"Starting PPO training for {args.total_timesteps} steps...")
         model.learn(
-            total_timesteps=actual_timesteps,
+            total_timesteps=args.total_timesteps,
             callback=callback,
             log_interval=args.log_interval
         )
 
         print(f"PPO training complete, best reward: {callback.best_reward}")
-        return callback.best_reward
+
+        # Clean up
+        vec_env.close()
+
+        return float(callback.best_reward) if np.isfinite(callback.best_reward) else -1.0
 
     except Exception as e:
         print(f"Error in run_ppo: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return -1.0  # Return a default negative reward on error

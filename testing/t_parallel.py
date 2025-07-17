@@ -26,35 +26,19 @@ class ParallelEvaluator:
 
     def evaluate_fitness(self, genomes, config, generation):
         """
-        Evaluate the fitness of each genome in parallel.
-
-        Parameters:
-        - genomes: List of (genome_id, genome) tuples
-        - config: Configuration object
-        - generation: Current generation number
+        Evaluate the fitness of each genome serially to avoid nested parallelism issues.
         """
-        logging.info(f"Evaluating {len(genomes)} genomes with {self.num_workers} workers (gen {generation})")
+        logging.info(f"Evaluating {len(genomes)} genomes serially (gen {generation})")
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-            # Submit all jobs
-            future_to_genome = {}
-            for i, (gid, genome) in enumerate(genomes):
-                future = executor.submit(self._evaluate_genome, genome, config, i, generation)
-                future_to_genome[future] = (gid, genome)
-
-            # Collect results
-            for future in concurrent.futures.as_completed(future_to_genome):
-                gid, genome = future_to_genome[future]
-                try:
-                    fitness = future.result(timeout=self.timeout)
-                    genome.fitness = fitness
-                    logging.info(f"Genome {gid} fitness: {fitness}")
-                except concurrent.futures.TimeoutError:
-                    logging.error(f"Genome {gid} evaluation timed out")
-                    genome.fitness = -1  # or some default value
-                except Exception as e:
-                    logging.error(f"Genome {gid} evaluation failed: {str(e)}")
-                    genome.fitness = -1  # or some default value
+        for i, (gid, genome) in enumerate(genomes):
+            try:
+                logging.info(f"Starting evaluation for genome {gid} ({i+1}/{len(genomes)})")
+                fitness = self.fitness_function(genome, config, gid, generation)  # Use gid instead of i
+                genome.fitness = fitness
+                logging.info(f"Genome {gid} completed with fitness: {fitness}")
+            except Exception as e:
+                logging.error(f"Genome {gid} evaluation failed: {e}")
+                genome.fitness = -1.0  # Default negative fitness for failed evaluations
 
     def _evaluate_genome(self, genome, config, idx, generation):
         """Wrapper for fitness function to handle exceptions"""
@@ -101,64 +85,3 @@ class ParallelEvaluator:
                     validity_all[idx] = False
 
         return validity_all
-
-
-# Example usage:
-
-# Define your fitness function
-# def eval_genome_fitness(genome, config, idx, generation):
-#     # Print process info to verify parallelism
-#     process_id = os.getpid()
-#     print(f"Evaluating genome {idx} in process {process_id} for generation {generation}")
-
-#     # Simulate some computation
-#     start_time = time.time()
-#     time.sleep(0.5)  # Simulate work
-
-#     # Your actual fitness calculation here
-#     fitness = idx + generation  # Just a dummy calculation
-
-#     end_time = time.time()
-#     print(f"Genome {idx} evaluation completed in {end_time - start_time:.2f}s (process {process_id})")
-
-#     return fitness
-
-# # Define your constraint function (if needed)
-# def eval_genome_constraint(genome, config, idx, generation):
-#     # Some constraint check
-#     return True  # All genomes are valid in this example
-
-# # Create dummy objects for testing
-# class DummyGenome:
-#     def __init__(self, id):
-#         self.id = id
-#         self.fitness = None
-
-# class DummyConfig:
-#     pass
-
-# # Setup parameters
-# num_cores = mp.cpu_count()  # Use all available cores
-# pop_size = 20
-# max_evaluations = 100
-
-# # Create dummy population
-# genomes = [(i, DummyGenome(i)) for i in range(pop_size)]
-# config = DummyConfig()
-
-# # Create the evaluator
-# evaluator = ParallelEvaluator(num_cores, eval_genome_fitness, eval_genome_constraint)
-
-# # Simulate a few generations
-# for generation in range(int(np.ceil(max_evaluations / pop_size))):
-#     print(f"\n--- Generation {generation} ---")
-
-#     # Evaluate fitness
-#     evaluator.evaluate_fitness(genomes, config, generation)
-
-#     # Evaluate constraints
-#     validity = evaluator.evaluate_constraint(genomes, config, generation)
-
-#     # Print results
-#     for (gid, genome), valid in zip(genomes, validity):
-#         print(f"Genome {gid}: Fitness={genome.fitness}, Valid={valid}")

@@ -17,6 +17,7 @@ sys.path.insert(1, os.path.join(external_dir, 'PyTorch-NEAT'))
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ppo_evaluation_args import create_ppo_eval_args
 from pytorch_neat.cppn import create_cppn
 
 import evogym.envs
@@ -81,43 +82,68 @@ def get_robot_from_genome(genome, config):
     return robot
 
 def eval_fitness(genome, config, genome_id, generation):
+    """Fixed to handle errors gracefully and return proper fitness values."""
     process_id = os.getpid()
     print(f"Evaluating genome {genome_id} on process {process_id} for generation {generation}")
 
-    robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
-    print(robot)
+    try:
+        robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
+        print(f"Robot shape: {robot.shape}")
 
-    # Check for duplicates and cache
-    robot_hash = hashable(robot)
-    if robot_hash in config.extra_info["structure_hashes"]:
-        # Re-use the original fitness
-        prev_fitness = config.extra_info["structure_hashes"][robot_hash]
-        print(f"   [SKIP] Duplicate structure (genome {genome_id}), reusing fitness {prev_fitness:.5f}")
-        genome.fitness = prev_fitness
-        return prev_fitness
+        # Check for duplicates and cache
+        robot_hash = hashable(robot)
+        if robot_hash in config.extra_info["structure_hashes"]:
+            prev_fitness = config.extra_info["structure_hashes"][robot_hash]
+            if isinstance(prev_fitness, (int, float)) and prev_fitness != True:  # Valid cached fitness
+                print(f"   [SKIP] Duplicate structure (genome {genome_id}), reusing fitness {prev_fitness:.5f}")
+                return prev_fitness
 
-    config.extra_info["structure_hashes"][robot_hash] = True
-    args = config.extra_info["args"]
+        # Validate robot structure
+        if not (is_connected(robot) and has_actuator(robot)):
+            print(f"   [INVALID] Robot structure invalid (genome {genome_id})")
+            config.extra_info["structure_hashes"][robot_hash] = -1.0
+            return -1.0
 
-    connectivity = get_full_connectivity(robot)
-    save_path_generation = os.path.join(config.extra_info['save_path'], f'generation_{generation}')
-    save_path_structure = os.path.join(save_path_generation, 'structure', f'{genome_id}')
-    save_path_controller = os.path.join(save_path_generation, 'controller')
-    np.savez(save_path_structure, robot, connectivity)
+        # Mark as being evaluated
+        config.extra_info["structure_hashes"][robot_hash] = True
+        args = config.extra_info["args"]
 
-    # Evaluate fitness with PPO
-    fitness = run_ppo(
-        args,
-        robot,
-        config.extra_info["env_name"],
-        save_path_controller,
-        str(genome_id),
-        connectivity
-    )
-    genome.fitness = fitness
-    config.extra_info["structure_hashes"][robot_hash] = fitness
-    print(f"Genome {genome_id} evaluation completed on process {process_id}")
-    return fitness
+        connectivity = get_full_connectivity(robot)
+        save_path_generation = os.path.join(config.extra_info['save_path'], f'generation_{generation}')
+        save_path_structure = os.path.join(save_path_generation, 'structure', f'{genome_id}')
+        save_path_controller = os.path.join(save_path_generation, 'controller')
+
+        # Ensure directories exist
+        os.makedirs(os.path.dirname(save_path_structure), exist_ok=True)
+        os.makedirs(save_path_controller, exist_ok=True)
+
+        np.savez(save_path_structure, robot, connectivity)
+
+        # Evaluate fitness with PPO
+        fitness = run_ppo(
+            args,
+            robot,
+            config.extra_info["env_name"],
+            save_path_controller,
+            str(genome_id),
+            connectivity
+        )
+
+        # Ensure fitness is a valid number
+        if not isinstance(fitness, (int, float)) or not np.isfinite(fitness):
+            print(f"   [WARNING] Invalid fitness returned: {fitness}, using -1.0")
+            fitness = -1.0
+
+        config.extra_info["structure_hashes"][robot_hash] = fitness
+        print(f"Genome {genome_id} evaluation completed with fitness: {fitness}")
+        return fitness
+
+    except Exception as e:
+        print(f"   [ERROR] Exception in eval_fitness for genome {genome_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return -1.0
+
 
 def eval_genome_constraint(genome, config, genome_id, generation):
     robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
@@ -183,7 +209,7 @@ def run_t(
             'structure_shape': structure_shape,
             'save_path': save_path,
             'structure_hashes': structure_hashes,
-            'args': args, # args for run_ppo
+            'args': create_ppo_eval_args(), # args for run_ppo
             'env_name': env_name,
         },
         custom_config=[
@@ -200,7 +226,9 @@ def run_t(
     for reporter in reporters:
         pop.add_reporter(reporter)
 
-    evaluator = ParallelEvaluator(num_cores, eval_fitness, eval_genome_constraint, timeout=600)
+    # evaluator = ParallelEvaluator(num_cores, eval_fitness, eval_genome_constraint, timeout=600)
+    evaluator = ParallelEvaluator(num_workers=1, fitness_function=eval_fitness, constraint_function=eval_genome_constraint, timeout=600)
+
 
     pop.run(
         evaluator.evaluate_fitness,

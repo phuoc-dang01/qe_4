@@ -8,13 +8,12 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use('Agg')
-sys.path.append('/home/pd468/qe/evogym/examples/')
-sys.path.append('/home/pd468/qe/evogym/examples/externals/PyTorch-NEAT/')
+from pathlib import Path
 
-# PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # ↑ 3 levels: → rl_mutation → qe
-# sys.path.insert(0, str(PROJECT_ROOT))
-# sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'ppo'))
-# sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples'))
+sys.path.insert(0, str(PROJECT_ROOT / 'evogym' / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
 import pdb
 import random

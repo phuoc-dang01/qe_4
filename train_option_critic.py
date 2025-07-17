@@ -44,9 +44,8 @@ def make_vec_env(env_fn, n_envs: int = 1):
 def setup_neat_config(args):
     """Create and configure the NEAT configuration."""
     config_path = os.path.join(os.path.dirname(__file__), 'neat.cfg')
-    # import ppo_evaluation_args
-    # ppo_args = ppo_evaluation_args.create_ppo_eval_args()
-    ppo_args = None
+    import ppo_evaluation_args
+    ppo_args = ppo_evaluation_args.create_ppo_eval_args()
     config = neat.Config(
         neat.DefaultGenome,
         neat.DefaultReproduction,
@@ -237,7 +236,7 @@ def init_train_args():
     parser.add_argument('--wandb_project', type=str, default='OptionCriticMutation')
     # parser.add_argument('--wandb_grad_save_freq', type=int, default=0)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    parser.add_argument('--save_dir', type=str, default=f'/home/pd468/qe/rl_mutation/models/{timestamp}')
+    parser.add_argument('--save_dir', type=str, default=f'./models/{timestamp}')
     parser.add_argument('--structure_shape', type=tuple, default=(5,5))
     parser.add_argument('--env_name', type=str, default='Walker-v0')
     args = parser.parse_args()

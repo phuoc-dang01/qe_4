@@ -1,21 +1,10 @@
 # ab_testing/ab_reproduction.py
 import logging
-import os
 import pdb
 import random
-from collections import defaultdict
-from typing import Any, Dict, List, Tuple
 
 import neat
-import numpy as np
-import torch
-from env.neat_env import NeatMutationEnv
 from neat.math_util import mean
-from option_critic.algorithm import OptionCriticPPO
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from train_option_critic import (create_option_critic_model, init_train_args,
-                                 make_vec_env, setup_neat_config)
 
 
 def setup_logger(name):
@@ -41,6 +30,11 @@ class TTestingReproduction(neat.DefaultReproduction):
         super().__init__(config, reporters, stagnation)
         self.rl_policy_path = rl_policy_path
         self.logger = setup_logger('t_testing')
+
+        self.rl_model = None
+        self.eval_env = None
+        self.rl_policy = None
+
         # Load the RL policy
         self.rl_model, self.eval_env = self.load_rl_policy(self.rl_policy_path)
         self.rl_policy = self.rl_model.policy
@@ -56,6 +50,7 @@ class TTestingReproduction(neat.DefaultReproduction):
     def load_rl_policy(self, policy_path):
         print(f"[DEBUG] load_rl_policy called with policy_path: {policy_path}")
         from test_policy import load_option_critic_model
+        from train_option_critic import init_train_args
         args = init_train_args()
         result = load_option_critic_model(policy_path, args)
         print(f"[DEBUG] load_option_critic_model returned successfully")
