@@ -64,7 +64,10 @@ class CPPNRobotGenerator:
         return material.reshape(structure_shape)
 
 def get_cppn_input(structure_shape):
-    x, y = torch.meshgrid(torch.arange(structure_shape[0]), torch.arange(structure_shape[1]))
+    x, y = torch.meshgrid(torch.arange(structure_shape[0]),
+                          torch.arange(structure_shape[1]),
+                          indexing="ij"
+                          )
     x, y = x.flatten(), y.flatten()
     center = (np.array(structure_shape) - 1) / 2
     d = ((x - center[0]) ** 2 + (y - center[1]) ** 2).sqrt()

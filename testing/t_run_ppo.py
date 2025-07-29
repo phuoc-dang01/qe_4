@@ -18,6 +18,7 @@ from evogym.envs import *
 
 from .t_callback import TEvalCallback
 
+# In t_run_ppo.py, replace the entire run_ppo function:
 
 def run_ppo(
     args: argparse.Namespace,
@@ -29,9 +30,9 @@ def run_ppo(
     seed: int = 42,
 ) -> float:
     """
-    Run PPO in serial mode with progress bar and wandb logging.
+    Run PPO in serial mode without W&B logging.
     """
-    print(f"Starting run_ppo for genome {model_save_name}, environment {env_name}")
+    print(f"[PPO] Starting run_ppo for genome {model_save_name}, environment {env_name}")
 
     try:
         env_kwargs = {
@@ -39,7 +40,7 @@ def run_ppo(
             'connections': connections,
         }
 
-        print(f"Creating environment {env_name}...")
+        print(f"[PPO] Creating environment {env_name}...")
         base_env = gym.make(env_name, **env_kwargs)
         monitored_env = Monitor(base_env)
         vec_env = DummyVecEnv([lambda: monitored_env])
@@ -48,24 +49,15 @@ def run_ppo(
         log_dir = os.path.join(model_save_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
 
-        # Initialize W&B
-        wandb.init(
-            project="NEAT-PPO-EvoGym",
-            name=model_save_name,
-            config=vars(args),
-            sync_tensorboard=True,
-            reinit=True,
-        )
-
-        # Configure SB3 logger to log to TensorBoard and stdout
-        sb3_logger = configure(log_dir, ["stdout", "tensorboard"])
+        # Configure SB3 logger (no W&B)
+        sb3_logger = configure(log_dir, ["stdout"])  # Removed tensorboard to reduce noise
 
         # Setup model
-        print("Creating PPO model...")
+        print(f"[PPO] Creating PPO model...")
         model = PPO(
             "MlpPolicy",
             vec_env,
-            verbose=args.verbose_ppo,
+            verbose=0,  # Reduce verbosity
             learning_rate=args.learning_rate,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
@@ -89,11 +81,11 @@ def run_ppo(
             n_evals=args.n_evals,
             model_save_dir=model_save_dir,
             model_save_name=model_save_name,
-            verbose=args.verbose_ppo,
+            verbose=0,  # Reduce callback verbosity
         )
 
         # Train
-        print(f"Starting PPO training for {args.total_timesteps} steps...")
+        print(f"[PPO] Starting PPO training for {args.total_timesteps} steps...")
         model.learn(
             total_timesteps=args.total_timesteps,
             callback=callback,
@@ -101,15 +93,14 @@ def run_ppo(
             progress_bar=True
         )
 
-        print(f"PPO training complete, best reward: {callback.best_reward}")
+        print(f"[PPO] PPO training complete, best reward: {callback.best_reward}")
 
         vec_env.close()
-        wandb.finish()
 
         return float(callback.best_reward) if np.isfinite(callback.best_reward) else -1.0
 
     except Exception as e:
-        print(f"Error in run_ppo: {str(e)}")
+        print(f"[PPO] Error in run_ppo: {str(e)}")
         import traceback
         traceback.print_exc()
         return -1.0

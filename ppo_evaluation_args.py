@@ -3,24 +3,30 @@ from types import SimpleNamespace as Namespace
 
 
 def create_ppo_eval_args():
-    """Ultra-fast PPO eval settings for rapid genome fitness trials."""
+    """Improved PPO eval settings for better robot fitness evaluation."""
     return Namespace(
-        n_steps        = 32,      # Reduced from 128
-        batch_size     = 32,      # Match n_steps for single update
-        n_epochs       = 1,       # Minimal epochs
-        total_timesteps= 100,     # Keep minimal
-        eval_interval  = 200,     # Skip evaluation during training
-        n_evals        = 1,
-        n_eval_envs    = 1,
-        log_interval   = 10,
-        verbose_ppo    = 0,       # Silent mode
-        learning_rate  = 3e-4,
-        gamma          = 0.99,
-        gae_lambda     = 0.95,
-        vf_coef        = 0.5,
-        max_grad_norm  = 0.5,
-        ent_coef       = 0.01,
-        clip_range     = 0.2,
-        n_envs         = 1,       # Single environment
+        # ——————————————————————————————————————————————————————
+        # Rollout & update sizes
+        n_steps        = 256,     # Increased buffer size for more stable training
+        batch_size     = 64,      # Larger batches for more stable gradients
+        n_epochs       = 8,       # More epochs to better use collected data
+        # ——————————————————————————————————————————————————————
+        # Total interaction budget per genome - INCREASED
+        total_timesteps= 256,    # Much more training time (was 100)
+        # ——————————————————————————————————————————————————————
+        # Evaluation settings
+        eval_interval  = 256,     # Evaluate every 500 steps
+        n_evals        = 3,       # Multiple evaluation runs for stability
+        n_eval_envs    = 1,       # Single environment for evaluation
+        log_interval   = 10,      # Less frequent logging
+        verbose_ppo    = 1,       # Standard verbosity
+        # ——————————————————————————————————————————————————————
+        # Learning & regularization
+        learning_rate  = 3e-4,    # Standard PPO learning rate
+        gamma          = 0.99,    # Standard discount factor
+        gae_lambda     = 0.95,    # Standard GAE parameter
+        vf_coef        = 0.5,     # Standard value loss weight
+        max_grad_norm  = 0.5,     # Standard gradient clipping
+        ent_coef       = 0.01,    # Standard entropy bonus
+        clip_range     = 0.2,     # Standard PPO clipping
     )
-

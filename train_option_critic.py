@@ -18,8 +18,8 @@ from datetime import datetime
 import neat
 import numpy as np
 import torch
-from env.callbacks import NEATMetricsCallback, OptionMetricsCallback
-from env.neat_env import NeatMutationEnv
+from env.env_callbacks import NEATMetricsCallback, OptionMetricsCallback
+from env.env_neat import NeatMutationEnv
 from fitness import evaluator
 from fitness.reward_const import RewardConst
 from option_critic.algorithm import OptionCriticPPO

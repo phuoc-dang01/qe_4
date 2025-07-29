@@ -4,10 +4,10 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['PYTHONBREAKPOINT'] = '0'
 
 import neat
-from env.neat_env import NeatMutationEnv
+from rl_mutation.env.env_neat import NeatMutationEnv
 from option_critic.algorithm import OptionCriticPPO
 from option_critic.policy import OptionCriticPolicy
-from env.callback import OptionMetricsCallback
+from env.env_callbacks import OptionMetricsCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure

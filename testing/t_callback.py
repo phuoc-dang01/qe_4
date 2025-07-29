@@ -75,7 +75,6 @@ class TEvalCallback(BaseCallback):
                 obs, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
                 total_reward += reward
-                print(f"Step reward: {reward:.4f}, total: {total_reward:.4f}")
 
             rewards.append(total_reward)
             env.close()

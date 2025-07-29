@@ -1,11 +1,16 @@
-# ab_testing/ab_reproduction.py
 import logging
 import pdb
 import random
+import sys
+from pathlib import Path
 
 import neat
+from fitness.reward_const import RewardConst
 from neat.math_util import mean
+import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 def setup_logger(name):
     """Set up logger with proper formatting."""
@@ -28,6 +33,7 @@ class TTestingReproduction(neat.DefaultReproduction):
     def __init__(self, config, reporters, stagnation, rl_policy_path=None):
         """Initialize the A/B testing reproduction module."""
         super().__init__(config, reporters, stagnation)
+        self.config = config  # Store config for later use
         self.rl_policy_path = rl_policy_path
         self.logger = setup_logger('t_testing')
 
@@ -35,26 +41,34 @@ class TTestingReproduction(neat.DefaultReproduction):
         self.eval_env = None
         self.rl_policy = None
 
-        # Load the RL policy
-        self.rl_model, self.eval_env = self.load_rl_policy(self.rl_policy_path)
-        self.rl_policy = self.rl_model.policy
+        # Load the RL policy if path provided
+        # if self.rl_policy_path:
+        if True:
+            self.rl_model, self.eval_env = self.load_rl_policy(self.rl_policy_path)
+            self.rl_policy = self.rl_model.policy if self.rl_model else None
+            self.logger.info(f"Using RL policy from: {rl_policy_path}")
+
         # Setup the activation functions
         self.activation_functions = ["sigmoid", "tanh", "abs", "gauss", "identity", "sin", "relu"]
-
-        if rl_policy_path:
-            self.logger.info(f"Using RL policy from: {rl_policy_path}")
 
         # Add generation counter
         self.generation = 0
 
     def load_rl_policy(self, policy_path):
-        print(f"[DEBUG] load_rl_policy called with policy_path: {policy_path}")
-        from test_policy import load_option_critic_model
-        from train_option_critic import init_train_args
-        args = init_train_args()
-        result = load_option_critic_model(policy_path, args)
-        print(f"[DEBUG] load_option_critic_model returned successfully")
-        return result
+        """Load the RL policy model."""
+        try:
+            print(f"[DEBUG] load_rl_policy called with policy_path: {policy_path}")
+            from test_policy import load_option_critic_model
+            from train_option_critic import init_train_args
+            args = init_train_args()
+            result = load_option_critic_model(policy_path, args)
+            print(f"[DEBUG] load_option_critic_model returned successfully")
+            return result
+        except Exception as e:
+            import traceback
+            self.logger.error(f"Failed to load RL policy: {e}")
+            traceback.print_exc()
+            return None, None
 
     def reproduce(self, config, species, pop_size, generation):
         """
@@ -111,6 +125,7 @@ class TTestingReproduction(neat.DefaultReproduction):
         # Create the new population
         new_population = {}
         species.species = {}
+
         # Handle reproduction for each species
         for spawn, s in zip(spawn_amounts, remaining_species):
             # Ensure at least elitism members survive
@@ -154,55 +169,148 @@ class TTestingReproduction(neat.DefaultReproduction):
                 child = config.genome_type(gid)
                 child.configure_crossover(parent1, parent2, config.genome_config)
 
-                child = self._apply_rl_mutation(child)
-                # Record group assignment and ancestry
-                new_population[gid] = child
+                print(f"[REPRODUCTION] Creating offspring {gid} from parents {parent1_id}, {parent2_id}")
+                print(f"[REPRODUCTION] Child before RL mutation - nodes: {len(child.nodes)}, connections: {len(child.connections)}")
+
+                # Apply RL-guided mutation if available, otherwise use standard mutation
+                # if self.rl_model and self.eval_env:
+                if True:
+                    mutated_child = self._apply_rl_mutation(child, config)
+                else:
+                    mutated_child = self._apply_standard_mutation(child, config)
+
+                print(f"[REPRODUCTION] Child after mutation - nodes: {len(mutated_child.nodes)}, connections: {len(mutated_child.connections)}")
+                print(f"[REPRODUCTION] Child fitness: {getattr(mutated_child, 'fitness', 'None')}")
+
+                # Record in new population
+                new_population[gid] = mutated_child
                 self.ancestors[gid] = (parent1_id, parent2_id)
+
+        print(f"[REPRODUCTION] New population summary:")
+        for gid, genome in new_population.items():
+            print(f"[REPRODUCTION]   Genome {gid}: nodes={len(genome.nodes)}, connections={len(genome.connections)}, fitness={getattr(genome, 'fitness', 'None')}")
 
         self.logger.info(f"Reproduction complete. New population size: {len(new_population)}")
         return new_population
 
-    def _apply_rl_mutation(self, genome):
-        print(f"[DEBUG] _apply_rl_mutation called for genome {genome.key}")
-        # Reset environment
-        obs = self.eval_env.reset()
-        inner_vec = getattr(self.eval_env, 'venv', self.eval_env)
-        wrapped = inner_vec.envs[0]
-        base_env = wrapped.unwrapped
+    def _apply_rl_mutation(self, genome, config):
+        """Apply RL-guided mutation to a genome."""
+        print(f"[RL_MUTATION] Starting RL-guided mutation for genome {genome.key}")
 
-        # Inject genome into environment
-        base_env.genome = genome
+        try:
+            # Create a fresh environment if needed
+            if self.eval_env is None:
+                from rl_mutation.env.env_neat import NeatMutationEnv
+                from stable_baselines3.common.monitor import Monitor
+                from stable_baselines3.common.vec_env import DummyVecEnv
 
-        best_reward = float('-inf')
-        best_genome = self._copy_genome(genome)
+                # Create base environment
+                base_env = NeatMutationEnv(config)
+                # Wrap it properly for compatibility
+                monitored_env = Monitor(base_env)
+                self.eval_env = DummyVecEnv([lambda: monitored_env])
 
-        # Perform RL-guided mutations
-        for step in range(3):
-            actions, _ = self.rl_model.predict(obs, deterministic=True)
+            # Rest env
+            obs = self.eval_env.reset()
 
-            action = actions[0]
-            print(f"[RL_MUTATE] Step {step+1}: action={actions[0]}")
-            obs, rewards, dones, infos = self.eval_env.step(actions)
+            base_env = self.eval_env.envs[0]
+            if hasattr(base_env, 'env'):
+                base_env = base_env.env
 
-            # Check if this mutation result is better than previous best
-            current_reward = rewards[0]
-            print(f"    reward={current_reward:.4f}, done={dones[0]}")
+            # Inject the genome into the already-reset environment
+            base_env.genome = self._copy_genome(genome)
+            base_env.prev_fitness = base_env._evaluate_genome()
+            initial_fitness = base_env.prev_fitness
+            base_env.fitness_history = [initial_fitness]
+            base_env.steps = 0
 
-            # If this is the best result so far, save it
-            if current_reward > best_reward:
-                best_reward = current_reward
-                # Create a deep copy of the current genome
-                best_genome = self._copy_genome(base_env.genome)
+            # Get fresh observation after genome injection
+            obs = np.array([base_env._get_observation()])
 
-            if dones[0]:
-                break
+            print(f"[RL_MUTATION] Initial fitness: {initial_fitness:.4f}")
+            print(f"[RL_MUTATION] Original genome: {len(genome.nodes)} nodes, {len(genome.connections)} connections")
 
-        # Return only the genome, not the tuple
-        return best_genome
+            # Track best result
+            best_fitness = initial_fitness
+            best_genome = self._copy_genome(genome)
+            best_info = None
+
+            # Perform multiple RL-guided mutation attempts
+            max_steps = 3
+            for step in range(max_steps):
+                # Get action from RL policy
+                actions, _ = self.rl_model.predict(obs, deterministic=True)
+
+                print(f"[RL_MUTATION] Step {step+1}: action={actions[0]}")
+
+                # Apply mutation through the vectorized environment
+                obs, rewards, dones, infos = self.eval_env.step(actions)
+
+                # Handle the fact that vectorized envs return lists/arrays
+                if isinstance(infos, list):
+                    info = infos[0]
+                else:
+                    info = infos
+
+                # Get fitness from info
+                current_fitness = info.get('fitness', float('-inf'))
+                mutation_successful = info.get('mutation_successful', False)
+
+                print(f"[RL_MUTATION]   Fitness: {current_fitness:.4f}, Reward: {rewards[0]:.4f}, Success: {mutation_successful}")
+
+                # Track best result
+                if current_fitness > best_fitness and current_fitness > RewardConst.INVALID_ROBOT:
+                    best_fitness = current_fitness
+                    best_genome = self._copy_genome(base_env.genome)
+                    best_genome.fitness = best_fitness  # Set fitness on genome
+                    best_info = info
+                    print(f"[RL_MUTATION]   *** NEW BEST: {best_fitness:.4f} ***")
+
+                if dones[0]:
+                    print(f"[RL_MUTATION]   Environment signaled done, stopping mutations")
+                    break
+
+            # Summary
+            print(f"[RL_MUTATION] Mutation complete:")
+            print(f"[RL_MUTATION]   Initial fitness: {initial_fitness:.4f}")
+            print(f"[RL_MUTATION]   Best fitness: {best_fitness:.4f}")
+            if initial_fitness > 0:
+                improvement = (best_fitness - initial_fitness) / initial_fitness * 100
+                print(f"[RL_MUTATION]   Improvement: {improvement:.1f}%")
+            print(f"[RL_MUTATION]   Final genome: {len(best_genome.nodes)} nodes, {len(best_genome.connections)} connections")
+
+            return best_genome
+
+        except Exception as e:
+            self.logger.error(f"RL mutation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to standard mutation
+            return self._apply_standard_mutation(genome, config)
+
+    def _apply_standard_mutation(self, genome, config):
+        """Apply standard NEAT mutations as fallback."""
+        print(f"[] Applying standard NEAT mutations to genome {genome.key}")
+
+        # Create a copy to mutate
+        mutated = self._copy_genome(genome)
+
+        # Apply standard NEAT mutations
+        mutated.mutate(config.genome_config)
+
+        return mutated
 
     def _copy_genome(self, genome):
         """Create a deep copy of a genome."""
-        # This is a simplified implementation - you might need to adjust based on your genome class
         import copy
-        return copy.deepcopy(genome)
-
+        try:
+            new_genome = copy.deepcopy(genome)
+            # Preserve key and fitness
+            new_genome.key = genome.key
+            if hasattr(genome, 'fitness'):
+                new_genome.fitness = genome.fitness
+            return new_genome
+        except Exception as e:
+            self.logger.error(f"Failed to copy genome: {e}")
+            # Fallback: return original
+            return genome

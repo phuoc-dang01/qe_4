@@ -1,7 +1,13 @@
 import os
+import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
-from env.neat_env import NeatMutationEnv
+from env.env_neat import NeatMutationEnv
 from option_critic.algorithm import OptionCriticPPO
 from option_critic.policy import OptionCriticPolicy
 from stable_baselines3.common.monitor import Monitor
@@ -80,12 +86,12 @@ def load_option_critic_model(model_path=None, args=None):
         with zipfile.ZipFile(model_path, 'r') as zip_file:
             # Load the policy parameters
             with zip_file.open('policy.pth') as f:
-                policy_state = torch.load(f, map_location='cpu')
+                 policy_state = torch.load(f, map_location='cpu', weights_only=True)
 
             # Load other parameters if they exist
             try:
                 with zip_file.open('pytorch_variables.pth') as f:
-                    pytorch_vars = torch.load(f, map_location='cpu')
+                    pytorch_vars  = torch.load(f, map_location='cpu', weights_only=True)
             except KeyError:
                 pytorch_vars = {}
 

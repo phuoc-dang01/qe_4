@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 import neat
 import numpy as np
 import torch
-from env.neat_env import NeatMutationEnv
+from env.env_neat import NeatMutationEnv
 from option_critic.algorithm import OptionCriticPPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize

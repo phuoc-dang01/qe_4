@@ -8,13 +8,6 @@ from fitness.reward_const import *
 from gymnasium import spaces
 from neat.genome import DefaultGenome
 
-
-class DummyEvaluator:
-    """Dummy evaluator for testing when full evaluation isn't available."""
-    def evaluate(self, genome):
-        # Return a random fitness for testing
-        return np.random.uniform(-1, 1)
-
 class NeatMutationEnv(gym.Env):
     ADD_NODE, DELETE_NODE, ADD_CONNECTION, DELETE_CONNECTION, MODIFY_WEIGHT, MODIFY_BIAS = range(6)
 
@@ -30,53 +23,20 @@ class NeatMutationEnv(gym.Env):
                 - "full": Complete robot simulation (requires all dependencies)
         """
         self.config = config
-        self.evaluator_type = evaluator_type
-        self.evaluator = None
-
         self._setup_action_spaces()
         self._setup_observation_space()
 
-        # Initialize evaluator based on type
-        self._initialize_evaluator()
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
 
-    def _initialize_evaluator(self):
-        """Initialize the appropriate evaluator based on type."""
-        try:
-            if self.evaluator_type == "dummy":
-                from fitness.base_evaluator import DummyEvaluator
-                self.evaluator = DummyEvaluator(self.config)
-                print(f"✓ Using DummyEvaluator for fast training")
+        # Create and configure genome
+        self.fitness_history = []
+        self.steps = 0
 
-            elif self.evaluator_type == "proxy":
-                from fitness.base_evaluator import ProxyEvaluator
-                self.evaluator = ProxyEvaluator(self.config)
-                print(f"✓ Using ProxyEvaluator for learned fitness prediction")
+        self._reset_bookkeeping()
+        self.prev_fitness = self._evaluate_genome()
 
-            elif self.evaluator_type == "full":
-                from fitness.evaluator import FitnessEvaluator
-                self.evaluator = FitnessEvaluator(self.config)
-                print(f"✓ Using FitnessEvaluator for complete robot simulation")
-
-            else:
-                raise ValueError(f"Unknown evaluator type: {self.evaluator_type}")
-
-        except ImportError as e:
-            print(f"⚠ Failed to load {self.evaluator_type} evaluator: {e}")
-            print(f"Falling back to DummyEvaluator")
-            from fitness.base_evaluator import DummyEvaluator
-            self.evaluator = DummyEvaluator(self.config)
-
-        except Exception as e:
-            print(f"✗ Error initializing evaluator: {e}")
-            print(f"Using minimal fallback evaluator")
-            self.evaluator = self._create_minimal_evaluator()
-
-    def _create_minimal_evaluator(self):
-        """Create a minimal evaluator when all else fails."""
-        class MinimalEvaluator:
-            def evaluate(self, genome):
-                return np.random.uniform(-1, 1)
-        return MinimalEvaluator()
+        return self._get_observation(), {}  # Always return (obs, info)
 
     def set_evaluator_type(self, evaluator_type: str):
         """Change evaluator type during runtime."""
@@ -84,27 +44,22 @@ class NeatMutationEnv(gym.Env):
         self._initialize_evaluator()
 
     def _evaluate_genome(self):
-        """Evaluate genome with error handling."""
+        """Evaluate genome using the centralized eval_fitness method."""
         try:
-            if self.evaluator is None:
-                self._initialize_evaluator()
-            return self.evaluator.evaluate(self.genome)
+            # Import the centralized evaluation function
+            from testing.t_runner import eval_fitness
+
+            # Use the same evaluation as the main evolution
+            fitness = eval_fitness(
+                self.genome,
+                self.config,
+                self.genome.key if hasattr(self.genome, 'key') else 0,
+                0  # generation number, not critical for single evaluation
+            )
+            return fitness
         except Exception as e:
             print(f"Warning: Evaluation failed: {e}")
             return RewardConst.INVALID_ROBOT
-
-    def _get_evaluator(self):
-        """Lazy loading of evaluator to avoid import issues."""
-        if self.evaluator is None:
-            try:
-                from fitness.evaluator import FitnessEvaluator
-                self.evaluator = FitnessEvaluator(self.config)
-                print("✓ FitnessEvaluator loaded successfully")
-            except ImportError as e:
-                print(f"✗ Failed to load FitnessEvaluator: {e}")
-                # Create a dummy evaluator for testing
-                self.evaluator = DummyEvaluator()
-        return self.evaluator
 
     def _setup_action_spaces(self):
         # Primary choices
@@ -150,142 +105,158 @@ class NeatMutationEnv(gym.Env):
         self.genome = DefaultGenome(0)
         self.genome.configure_new(self.config.genome_config)
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
+    def reset_for_new_genome(self, genome):
+        """Reset environment state for a new genome without full reset."""
+        print(f"[NEAT_ENV] Resetting for new genome {getattr(genome, 'key', 'unknown')}")
 
-        # Create and configure genome
+        # Set the new genome
+        self.genome = genome
+
+        # Reset fitness tracking
         self.fitness_history = []
+        self.prev_fitness = 0.0
         self.steps = 0
 
-        self._reset_bookkeeping()
-        self.prev_fitness = self._evaluate_genome()
+        # Get initial fitness
+        try:
+            self.prev_fitness = self._evaluate_genome()
+            print(f"[NEAT_ENV] Initial fitness for genome: {self.prev_fitness:.4f}")
+        except Exception as e:
+            print(f"[NEAT_ENV] Failed to evaluate initial fitness: {e}")
+            self.prev_fitness = RewardConst.INVALID_ROBOT
 
-        return self._get_observation(), {}
+        return self._get_observation()
 
     def step(self, action):
         primary, secondary = int(action[0]), int(action[1])
-        # print(f"Primary aciton: {primary}, secondary: {secondary}" )
+        print(f"[NEAT_ENV] Mutation: primary={primary}, secondary={secondary}")
 
         cfg = self.config.genome_config
         inputs, outputs = list(cfg.input_keys), list(cfg.output_keys)
 
-        # Dispatch by primary choice
+        # Store pre-mutation state for comparison
+        pre_fitness = self.prev_fitness
+        pre_nodes = len(self.genome.nodes)
+        pre_conns = len(self.genome.connections)
+
+        # Apply mutation based on primary action
+        mutation_successful = False
+
         if primary == self.ADD_NODE:
             if secondary < len(self.activation_functions):
                 act_fn = self.activation_functions[secondary]
             else:
-                # Default to a safe activation function if out of bounds
                 act_fn = self.activation_functions[0]
-            self.genome.mutate_add_node(cfg)
-            # Assign activation to the new node
-            newest = max(self.genome.nodes)
-            if newest not in inputs + outputs:
-                self.genome.nodes[newest].activation = act_fn
+
+            old_node_count = len(self.genome.nodes)
+            try:
+                self.genome.mutate_add_node(cfg)
+                newest = max(self.genome.nodes) if self.genome.nodes else None
+                if newest and newest not in inputs + outputs:
+                    self.genome.nodes[newest].activation = act_fn
+                mutation_successful = len(self.genome.nodes) > old_node_count
+            except (AssertionError, KeyError, ValueError) as e:
+                print(f"[NEAT_ENV] Add node mutation failed: {e}")
+                mutation_successful = False
 
         elif primary == self.DELETE_NODE:
-            self.genome.mutate_delete_node(cfg)
+            old_node_count = len(self.genome.nodes)
+            try:
+                self.genome.mutate_delete_node(cfg)
+                mutation_successful = len(self.genome.nodes) < old_node_count
+            except (AssertionError, KeyError, ValueError) as e:
+                print(f"[NEAT_ENV] Delete node mutation failed: {e}")
+                mutation_successful = False
 
         elif primary == self.ADD_CONNECTION:
+            old_conn_count = len(self.genome.connections)
             try:
                 self.genome.mutate_add_connection(cfg)
+                mutation_successful = len(self.genome.connections) > old_conn_count
             except Exception as e:
-                print(f"Activation function index error: {e}")
+                print(f"Add connection failed: {e}")
+                mutation_successful = False
 
         elif primary == self.DELETE_CONNECTION:
-            self.genome.mutate_delete_connection()
+            old_conn_count = len(self.genome.connections)
+            try:
+                self.genome.mutate_delete_connection()
+                mutation_successful = len(self.genome.connections) < old_conn_count
+            except (AssertionError, KeyError, ValueError) as e:
+                print(f"[NEAT_ENV] Delete connection mutation failed: {e}")
+                mutation_successful = False
 
         elif primary == self.MODIFY_WEIGHT:
             conns = list(self.genome.connections.values())
             if conns:
                 num_conns = len(conns)
-                # Map to valid range with modulo
                 conn_index = secondary % num_conns
                 cg = conns[conn_index]
 
-                # Apply mutation based on NEAT parameters
-                if random.random() < self.config.genome_config.weight_mutate_rate:
-                    if random.random() < self.config.genome_config.weight_replace_rate:
-                        # Complete replacement
-                        cg.weight = random.gauss(
-                            self.config.genome_config.weight_init_mean,
-                            self.config.genome_config.weight_init_stdev
-                        )
+                old_weight = cg.weight
+                if random.random() < cfg.weight_mutate_rate:
+                    if random.random() < cfg.weight_replace_rate:
+                        cg.weight = random.gauss(cfg.weight_init_mean, cfg.weight_init_stdev)
                     else:
-                        # Perturbation
-                        cg.weight += random.gauss(0.0, 1.0) * self.config.genome_config.weight_mutate_power
+                        cg.weight += random.gauss(0.0, 1.0) * cfg.weight_mutate_power
 
-
-                    # Ensure weight is within bounds
-                    cg.weight = max(
-                        self.config.genome_config.weight_min_value,
-                        min(cg.weight, self.config.genome_config.weight_max_value)
-                    )
+                    cg.weight = max(cfg.weight_min_value, min(cg.weight, cfg.weight_max_value))
+                    mutation_successful = abs(cg.weight - old_weight) > 1e-6
 
         elif primary == self.MODIFY_BIAS:
             nodes = list(self.genome.nodes.values())
             if nodes:
                 num_nodes = len(nodes)
-                # Map to valid range with modulo
                 node_index = secondary % num_nodes
                 ng = nodes[node_index]
 
-                # Apply bias mutation with similar logic
-                if random.random() < self.config.genome_config.bias_mutate_rate:
-                    if random.random() < self.config.genome_config.bias_replace_rate:
-                        # Complete replacement
-                        ng.bias = random.gauss(
-                            self.config.genome_config.bias_init_mean,
-                            self.config.genome_config.bias_init_stdev
-                        )
+                old_bias = ng.bias
+                if random.random() < cfg.bias_mutate_rate:
+                    if random.random() < cfg.bias_replace_rate:
+                        ng.bias = random.gauss(cfg.bias_init_mean, cfg.bias_init_stdev)
                     else:
-                        # Perturbation
-                        ng.bias += random.gauss(0.0, 1.0) * self.config.genome_config.bias_mutate_power
+                        ng.bias += random.gauss(0.0, 1.0) * cfg.bias_mutate_power
 
-                    # Ensure bias is within bounds
-                    ng.bias = max(
-                        self.config.genome_config.bias_min_value,
-                        min(ng.bias, self.config.genome_config.bias_max_value)
-                    )
+                    ng.bias = max(cfg.bias_min_value, min(ng.bias, cfg.bias_max_value))
+                    mutation_successful = abs(ng.bias - old_bias) > 1e-6
 
-        # Compute reward + termination
-        current = self._evaluate_genome()
-        reward, terminated = self.calculate_reward(current, self.prev_fitness)
+        # Evaluate the mutated genome
+        current_fitness = self._evaluate_genome()
+        print(f"[NEAT_ENV] Pre-mutation fitness: {pre_fitness:.4f}")
+        print(f"[NEAT_ENV] Post-mutation fitness: {current_fitness:.4f}")
+        print(f"[NEAT_ENV] Mutation successful: {mutation_successful}")
 
-        if len(self.fitness_history) >= 2:
-            if current > self.fitness_history[-1] and self.fitness_history[-1] > self.fitness_history[-2]:
-                reward += 0.25
+        # Use the calculate_reward method for consistency
+        reward, terminated = self.calculate_reward(current_fitness, pre_fitness)
 
+        # Add mutation-specific bonuses/penalties
+        if mutation_successful and reward > 0:
+            reward += 0.1  # Bonus for successful improving mutations
+        elif mutation_successful and reward <= 0:
+            reward -= 0.05  # Small penalty for successful but non-improving mutations
+        elif not mutation_successful:
+            reward -= 0.1  # Penalty for failed mutations
 
-        self.prev_fitness = current
-        self.fitness_history.append(current)
+        print(f"[NEAT_ENV] Final reward: {reward:.4f}, terminated: {terminated}")
+
+        # Update state
+        self.prev_fitness = current_fitness
+        self.fitness_history.append(current_fitness)
         self.steps += 1
 
-        terminated = terminated or (self.steps >= self.max_steps)
-
-        if current <= RewardConst.INVALID_ROBOT:
-            # enforce the hard penalty exactly, no further shaping
-            reward = RewardConst.INVALID_ROBOT
-            terminated = True
-        else:
-            reward = float(current - self.prev_fitness)
-            terminated = False
-
-        self.prev_fitness = current
-        self.fitness_history.append(current)
-
-        # counter
-        self.steps += 1
-        truncated  = (self.steps >= self.max_steps)
+        truncated = (self.steps >= self.max_steps)
 
         info = {
             'mutation_type': primary,
             'parameter_bucket': secondary,
             'num_nodes': len(self.genome.nodes),
             'num_connections': len(self.genome.connections),
-            'fitness': current,
-            'fitness_improvement': reward,
-            'enabled_ratio': sum(1 for c in self.genome.connections.values() if c.enabled) / max(1, len(self.genome.connections)),
-            'genome_size': len(self.genome.nodes) + len(self.genome.connections),
+            'fitness': current_fitness,
+            'fitness_improvement': current_fitness - pre_fitness if current_fitness > RewardConst.INVALID_ROBOT else 0,
+            'mutation_successful': mutation_successful,
+            'reward': reward,
+            'pre_fitness': pre_fitness,
+            'post_fitness': current_fitness,
             'step': self.steps
         }
 
@@ -297,13 +268,19 @@ class NeatMutationEnv(gym.Env):
         if current_fitness <= RewardConst.INVALID_ROBOT:
             return RewardConst.INVALID_ROBOT, True
 
-        # Calculate improvement
-        improvement = current_fitness - (prev_fitness * RewardConst.SCALE_PREVIOUS)
+        # Calculate improvement with scaling
+        scaled_prev = prev_fitness * RewardConst.SCALE_PREVIOUS
+        improvement = current_fitness - scaled_prev
 
-        if improvement >= 0:
-            return RewardConst.POS_REWARD, False
+        # Base reward on improvement
+        if improvement > 0:
+            # Positive improvement gets positive reward
+            base_reward = min(improvement * 10, RewardConst.POS_REWARD)  # Scale and clip
+            return base_reward, False
         else:
-            return RewardConst.NEG_REWARD, False
+            # No improvement or negative gets negative reward
+            base_reward = max(improvement * 10, RewardConst.NEG_REWARD)  # Scale and clip
+            return base_reward, False
 
     def _add_node_with_activation(self, activation_function):
         """Add a node with the specified activation function."""
