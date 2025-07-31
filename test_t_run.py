@@ -1,4 +1,6 @@
-# train_ab_testing.py
+import multiprocessing as mp
+mp.set_start_method('spawn', force=True)
+
 import argparse
 import multiprocessing as mp
 import os
@@ -32,10 +34,10 @@ if __name__ == "__main__":
     args = create_t_args(
         exp_name="test_walker",
         env_name="Walker-v0",  # Make sure this is a valid environment
-        pop_size=3,
+        pop_size=2,
         structure_shape=(5, 5),
-        max_evaluations=9,
-        num_cores=3  # Use a smaller number for testing
+        max_evaluations=6,
+        num_cores=1  # Use a smaller number for testing
     )
     random.seed(SEED)
     np.random.seed(SEED)

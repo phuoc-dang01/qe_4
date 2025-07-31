@@ -106,24 +106,15 @@ class NeatMutationEnv(gym.Env):
         self.genome.configure_new(self.config.genome_config)
 
     def reset_for_new_genome(self, genome):
-        """Reset environment state for a new genome without full reset."""
+        """Reset environment state for a new genome without fitness evaluation."""
         print(f"[NEAT_ENV] Resetting for new genome {getattr(genome, 'key', 'unknown')}")
 
-        # Set the new genome
         self.genome = genome
-
-        # Reset fitness tracking
-        self.fitness_history = []
-        self.prev_fitness = 0.0
         self.steps = 0
 
-        # Get initial fitness
-        try:
-            self.prev_fitness = self._evaluate_genome()
-            print(f"[NEAT_ENV] Initial fitness for genome: {self.prev_fitness:.4f}")
-        except Exception as e:
-            print(f"[NEAT_ENV] Failed to evaluate initial fitness: {e}")
-            self.prev_fitness = RewardConst.INVALID_ROBOT
+        # Don't evaluate fitness here
+        self.prev_fitness = 0.0
+        self.fitness_history = []
 
         return self._get_observation()
 
@@ -321,8 +312,7 @@ class NeatMutationEnv(gym.Env):
             self.genome.remove_node(node_key)
 
     def _get_observation(self):
-        """Extract features from the genome."""
-        # Example features (customize based on your needs):
+        """Extract features from the genome without fitness evaluation."""
         features = []
 
         # 1. Network structure features
@@ -338,14 +328,7 @@ class NeatMutationEnv(gym.Env):
         else:
             features.extend([0, 0])
 
-        # 3. Recent fitness history (last 4 values)
-        fitness_history = self.fitness_history[-4:] if self.fitness_history else []
-        fitness_history = [0] * (4 - len(fitness_history)) + fitness_history
-        features.extend(fitness_history)
-
-        for i, feature in enumerate(features):
-            if np.isnan(feature) or np.isinf(feature):
-                print(f"Warning: Feature {i} is NaN or Inf, setting to 0")
-                features[i] = 0.0
+        # 3. Dummy fitness history (since we're not evaluating)
+        features.extend([0, 0, 0, 0])
 
         return np.array(features, dtype=np.float32)

@@ -21,7 +21,7 @@ def test_minimal_flow():
     print("\n1. Testing imports...")
     try:
         import neat
-        from env.neat_env import NeatMutationEnv
+        from rl_mutation.env.env_neat import NeatMutationEnv
         from option_critic.algorithm import OptionCriticPPO
         from option_critic.policy import OptionCriticPolicy
         print("✓ All core imports successful")

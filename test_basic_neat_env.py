@@ -3,7 +3,7 @@ import sys
 
 import neat
 import numpy as np
-from env.neat_env import NeatMutationEnv
+from rl_mutation.env.env_neat import NeatMutationEnv
 
 
 # Simple test to verify NEAT environment works

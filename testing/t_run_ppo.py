@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import torch
 
 import gymnasium as gym  # instead of gym
 import numpy as np
@@ -20,19 +21,8 @@ from .t_callback import TEvalCallback
 
 # In t_run_ppo.py, replace the entire run_ppo function:
 
-def run_ppo(
-    args: argparse.Namespace,
-    body: np.ndarray,
-    env_name: str,
-    model_save_dir: str,
-    model_save_name: str,
-    connections: Optional[np.ndarray] = None,
-    seed: int = 42,
-) -> float:
-    """
-    Run PPO in serial mode without W&B logging.
-    """
-    print(f"[PPO] Starting run_ppo for genome {model_save_name}, environment {env_name}")
+def run_ppo(args, body, env_name, model_save_dir, model_save_name, connections=None, seed=42):
+    print(f"[DEBUG PPO] Process {os.getpid()} starting run_ppo for {model_save_name}")
 
     try:
         env_kwargs = {
@@ -50,14 +40,17 @@ def run_ppo(
         os.makedirs(log_dir, exist_ok=True)
 
         # Configure SB3 logger (no W&B)
-        sb3_logger = configure(log_dir, ["stdout"])  # Removed tensorboard to reduce noise
+        print(f"[DEBUG PPO] Configuring logger...")
+        sb3_logger = configure(log_dir, ["stdout"])
+
+        print(f"[DEBUG PPO] Creating PPO model on process {os.getpid()}...")
+        print(f"[DEBUG PPO] Using device: {torch.cuda.is_available()}")
 
         # Setup model
-        print(f"[PPO] Creating PPO model...")
         model = PPO(
             "MlpPolicy",
             vec_env,
-            verbose=0,  # Reduce verbosity
+            verbose=0,
             learning_rate=args.learning_rate,
             n_steps=args.n_steps,
             batch_size=args.batch_size,
@@ -68,8 +61,10 @@ def run_ppo(
             max_grad_norm=args.max_grad_norm,
             ent_coef=args.ent_coef,
             clip_range=args.clip_range,
-            seed=seed
+            seed=seed,
+            device='cpu'  # Force CPU to avoid GPU conflicts
         )
+        print(f"[DEBUG PPO] PPO model created successfully")
         model.set_logger(sb3_logger)
 
         # Setup callback

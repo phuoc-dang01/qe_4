@@ -194,7 +194,7 @@ class TTestingReproduction(neat.DefaultReproduction):
         return new_population
 
     def _apply_rl_mutation(self, genome, config):
-        """Apply RL-guided mutation to a genome."""
+        """Apply single RL-guided mutation to a genome."""
         print(f"[RL_MUTATION] Starting RL-guided mutation for genome {genome.key}")
 
         try:
@@ -210,76 +210,33 @@ class TTestingReproduction(neat.DefaultReproduction):
                 monitored_env = Monitor(base_env)
                 self.eval_env = DummyVecEnv([lambda: monitored_env])
 
-            # Rest env
+            # Reset env
             obs = self.eval_env.reset()
 
             base_env = self.eval_env.envs[0]
             if hasattr(base_env, 'env'):
                 base_env = base_env.env
 
-            # Inject the genome into the already-reset environment
+            # Inject the genome into the environment WITHOUT evaluating fitness
             base_env.genome = self._copy_genome(genome)
-            base_env.prev_fitness = base_env._evaluate_genome()
-            initial_fitness = base_env.prev_fitness
-            base_env.fitness_history = [initial_fitness]
             base_env.steps = 0
 
-            # Get fresh observation after genome injection
+            # Get observation without fitness evaluation
             obs = np.array([base_env._get_observation()])
 
-            print(f"[RL_MUTATION] Initial fitness: {initial_fitness:.4f}")
             print(f"[RL_MUTATION] Original genome: {len(genome.nodes)} nodes, {len(genome.connections)} connections")
 
-            # Track best result
-            best_fitness = initial_fitness
-            best_genome = self._copy_genome(genome)
-            best_info = None
+            # Get action from RL policy - SINGLE STEP ONLY
+            actions, _ = self.rl_model.predict(obs, deterministic=True)
+            print(f"[RL_MUTATION] Applying single mutation: action={actions[0]}")
 
-            # Perform multiple RL-guided mutation attempts
-            max_steps = 3
-            for step in range(max_steps):
-                # Get action from RL policy
-                actions, _ = self.rl_model.predict(obs, deterministic=True)
+            # Apply mutation without fitness evaluation
+            mutated_genome = self._apply_mutation_only(base_env, actions[0], config)
 
-                print(f"[RL_MUTATION] Step {step+1}: action={actions[0]}")
+            print(f"[RL_MUTATION] Mutation complete")
+            print(f"[RL_MUTATION] Final genome: {len(mutated_genome.nodes)} nodes, {len(mutated_genome.connections)} connections")
 
-                # Apply mutation through the vectorized environment
-                obs, rewards, dones, infos = self.eval_env.step(actions)
-
-                # Handle the fact that vectorized envs return lists/arrays
-                if isinstance(infos, list):
-                    info = infos[0]
-                else:
-                    info = infos
-
-                # Get fitness from info
-                current_fitness = info.get('fitness', float('-inf'))
-                mutation_successful = info.get('mutation_successful', False)
-
-                print(f"[RL_MUTATION]   Fitness: {current_fitness:.4f}, Reward: {rewards[0]:.4f}, Success: {mutation_successful}")
-
-                # Track best result
-                if current_fitness > best_fitness and current_fitness > RewardConst.INVALID_ROBOT:
-                    best_fitness = current_fitness
-                    best_genome = self._copy_genome(base_env.genome)
-                    best_genome.fitness = best_fitness  # Set fitness on genome
-                    best_info = info
-                    print(f"[RL_MUTATION]   *** NEW BEST: {best_fitness:.4f} ***")
-
-                if dones[0]:
-                    print(f"[RL_MUTATION]   Environment signaled done, stopping mutations")
-                    break
-
-            # Summary
-            print(f"[RL_MUTATION] Mutation complete:")
-            print(f"[RL_MUTATION]   Initial fitness: {initial_fitness:.4f}")
-            print(f"[RL_MUTATION]   Best fitness: {best_fitness:.4f}")
-            if initial_fitness > 0:
-                improvement = (best_fitness - initial_fitness) / initial_fitness * 100
-                print(f"[RL_MUTATION]   Improvement: {improvement:.1f}%")
-            print(f"[RL_MUTATION]   Final genome: {len(best_genome.nodes)} nodes, {len(best_genome.connections)} connections")
-
-            return best_genome
+            return mutated_genome
 
         except Exception as e:
             self.logger.error(f"RL mutation failed: {e}")
@@ -287,6 +244,42 @@ class TTestingReproduction(neat.DefaultReproduction):
             traceback.print_exc()
             # Fallback to standard mutation
             return self._apply_standard_mutation(genome, config)
+
+    def _apply_mutation_only(self, env, action, config):
+        """Apply mutation without fitness evaluation"""
+        primary, secondary = int(action[0]), int(action[1])
+
+        # Copy genome before mutation
+        genome = self._copy_genome(env.genome)
+
+        # Apply the mutation based on primary action
+        cfg = config.genome_config
+
+        if primary == 0:  # ADD_NODE
+            genome.mutate_add_node(cfg)
+        elif primary == 1:  # DELETE_NODE
+            genome.mutate_delete_node(cfg)
+        elif primary == 2:  # ADD_CONNECTION
+            genome.mutate_add_connection(cfg)
+        elif primary == 3:  # DELETE_CONNECTION
+            genome.mutate_delete_connection()
+        elif primary == 4:  # MODIFY_WEIGHT
+            # Apply weight mutation logic
+            conns = list(genome.connections.values())
+            if conns:
+                conn_index = secondary % len(conns)
+                cg = conns[conn_index]
+                cg.weight = random.gauss(cfg.weight_init_mean, cfg.weight_init_stdev)
+        elif primary == 5:  # MODIFY_BIAS
+            # Apply bias mutation logic
+            nodes = list(genome.nodes.values())
+            if nodes:
+                node_index = secondary % len(nodes)
+                ng = nodes[node_index]
+                ng.bias = random.gauss(cfg.bias_init_mean, cfg.bias_init_stdev)
+
+        return genome
+
 
     def _apply_standard_mutation(self, genome, config):
         """Apply standard NEAT mutations as fallback."""

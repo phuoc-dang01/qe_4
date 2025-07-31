@@ -20,9 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ppo_evaluation_args import create_ppo_eval_args
 from pytorch_neat.cppn import create_cppn
 
-import evogym.envs
 from evogym import get_full_connectivity, has_actuator, hashable, is_connected
 from evogym.envs import *
+import evogym.envs
 
 from .t_parallel import ParallelEvaluator
 from .t_population import Population
@@ -84,34 +84,57 @@ def get_robot_from_genome(genome, config):
     robot = material.reshape(structure_shape)
     return robot
 
+def eval_genome_constraint(genome, config, genome_id, generation):
+    """Check if genome produces valid and unique robot structure."""
+    try:
+        # Generate robot from genome
+        robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
+
+        # Check basic validity
+        if not is_connected(robot):
+            print(f"   [INVALID] Robot not connected (genome {genome_id})")
+            return False
+
+        if not has_actuator(robot):
+            print(f"   [INVALID] Robot has no actuators (genome {genome_id})")
+            return False
+
+        # Check uniqueness
+        robot_hash = hashable(robot)
+        if robot_hash in config.extra_info["structure_hashes"]:
+            print(f"   [DUPLICATE] Structure already exists (genome {genome_id})")
+            return False
+
+        # Mark this structure as seen
+        config.extra_info["structure_hashes"][robot_hash] = True
+        return True
+
+    except Exception as e:
+        print(f"   [ERROR] Constraint check failed for genome {genome_id}: {str(e)}")
+        return False
+
+
 def eval_fitness(genome, config, genome_id, generation):
-    """Fixed to handle errors gracefully and return proper fitness values."""
+    """Evaluate genome fitness using PPO. Assumes genome passed constraint check."""
     process_id = os.getpid()
     print(f"Evaluating genome {genome_id} on process {process_id} for generation {generation}")
 
     try:
+        # Generate robot from genome
         robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
         print(f"Robot shape: {robot.shape}")
 
-        # Check for duplicates and cache
-        robot_hash = hashable(robot)
-        if robot_hash in config.extra_info["structure_hashes"]:
-            prev_fitness = config.extra_info["structure_hashes"][robot_hash]
-            if isinstance(prev_fitness, (int, float)) and prev_fitness != True:  # Valid cached fitness
-                print(f"   [SKIP] Duplicate structure (genome {genome_id}), reusing fitness {prev_fitness:.5f}")
-                return prev_fitness
+        # Get configuration
+        if 'get_ppo_args' in config.extra_info:
+            args = config.extra_info['get_ppo_args']()
+        else:
+            # Fallback for compatibility
+            args = config.extra_info['args']
 
-        # Validate robot structure
-        if not (is_connected(robot) and has_actuator(robot)):
-            print(f"   [INVALID] Robot structure invalid (genome {genome_id})")
-            config.extra_info["structure_hashes"][robot_hash] = -1.0
-            return -1.0
-
-        # Mark as being evaluated
-        config.extra_info["structure_hashes"][robot_hash] = True
-        args = config.extra_info["args"]
-
+        env_name = config.extra_info["env_name"]
         connectivity = get_full_connectivity(robot)
+
+        # Set up save paths
         save_path_generation = os.path.join(config.extra_info['save_path'], f'generation_{generation}')
         save_path_structure = os.path.join(save_path_generation, 'structure', f'{genome_id}')
         save_path_controller = os.path.join(save_path_generation, 'controller')
@@ -120,13 +143,14 @@ def eval_fitness(genome, config, genome_id, generation):
         os.makedirs(os.path.dirname(save_path_structure), exist_ok=True)
         os.makedirs(save_path_controller, exist_ok=True)
 
+        # Save structure
         np.savez(save_path_structure, robot, connectivity)
 
         # Evaluate fitness with PPO
         fitness = run_ppo(
             args,
             robot,
-            config.extra_info["env_name"],
+            env_name,
             save_path_controller,
             str(genome_id),
             connectivity
@@ -137,7 +161,6 @@ def eval_fitness(genome, config, genome_id, generation):
             print(f"   [WARNING] Invalid fitness returned: {fitness}, using -1.0")
             fitness = -1.0
 
-        config.extra_info["structure_hashes"][robot_hash] = fitness
         print(f"Genome {genome_id} evaluation completed with fitness: {fitness}")
         return fitness
 
@@ -146,11 +169,6 @@ def eval_fitness(genome, config, genome_id, generation):
         import traceback
         traceback.print_exc()
         return -1.0
-
-
-def eval_genome_constraint(genome, config, genome_id, generation):
-    robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
-    return is_connected(robot) and has_actuator(robot)
 
 
 class SaveResultReporter(neat.BaseReporter):
@@ -202,6 +220,10 @@ def run_t(
     structure_hashes = {}
 
     config_path = os.path.join(curr_dir, 'neat.cfg')
+
+    def get_fresh_ppo_args():
+        return create_ppo_eval_args()
+
     config = neat.Config(
         neat.DefaultGenome,
         neat.DefaultReproduction,
@@ -230,8 +252,13 @@ def run_t(
         pop.add_reporter(reporter)
 
     # evaluator = ParallelEvaluator(num_cores, eval_fitness, eval_genome_constraint, timeout=600)
-    evaluator = ParallelEvaluator(num_workers=1, fitness_function=eval_fitness, constraint_function=eval_genome_constraint, timeout=600)
-
+    # evaluator = ParallelEvaluator(num_workers=num_cores, fitness_function=eval_fitness, constraint_function=eval_genome_constraint, timeout=600)
+    evaluator = ParallelEvaluator(
+    num_workers=num_cores,
+    fitness_function=eval_fitness,
+    constraint_function=eval_genome_constraint,  # Add this
+    timeout=600
+)
 
     pop.run(
         evaluator.evaluate_fitness,

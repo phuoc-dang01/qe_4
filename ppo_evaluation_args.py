@@ -8,6 +8,7 @@ def create_ppo_eval_args():
         # ——————————————————————————————————————————————————————
         # Rollout & update sizes
         n_steps        = 256,     # Increased buffer size for more stable training
+        n_envs         = 4,
         batch_size     = 64,      # Larger batches for more stable gradients
         n_epochs       = 8,       # More epochs to better use collected data
         # ——————————————————————————————————————————————————————
@@ -15,7 +16,7 @@ def create_ppo_eval_args():
         total_timesteps= 256,    # Much more training time (was 100)
         # ——————————————————————————————————————————————————————
         # Evaluation settings
-        eval_interval  = 256,     # Evaluate every 500 steps
+        eval_interval  = 128,     # Evaluate every 500 steps
         n_evals        = 3,       # Multiple evaluation runs for stability
         n_eval_envs    = 1,       # Single environment for evaluation
         log_interval   = 10,      # Less frequent logging
