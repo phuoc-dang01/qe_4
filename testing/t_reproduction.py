@@ -163,7 +163,6 @@ class TTestingReproduction(neat.DefaultReproduction):
                 # Select parents
                 parent1_id, parent1 = random.choice(old_members)
                 parent2_id, parent2 = random.choice(old_members)
-
                 # Create a new genome
                 gid = next(self.genome_indexer)
                 child = config.genome_type(gid)
@@ -173,10 +172,10 @@ class TTestingReproduction(neat.DefaultReproduction):
                 print(f"[REPRODUCTION] Child before RL mutation - nodes: {len(child.nodes)}, connections: {len(child.connections)}")
 
                 # Apply RL-guided mutation if available, otherwise use standard mutation
-                # if self.rl_model and self.eval_env:
-                if True:
+                if self.rl_model and self.eval_env:
                     mutated_child = self._apply_rl_mutation(child, config)
                 else:
+                    print(f"[REPRODUCTION] RL model not available, using standard mutation")
                     mutated_child = self._apply_standard_mutation(child, config)
 
                 print(f"[REPRODUCTION] Child after mutation - nodes: {len(mutated_child.nodes)}, connections: {len(mutated_child.connections)}")
@@ -198,40 +197,26 @@ class TTestingReproduction(neat.DefaultReproduction):
         print(f"[RL_MUTATION] Starting RL-guided mutation for genome {genome.key}")
 
         try:
-            # Create a fresh environment if needed
+            # Create environment if needed
             if self.eval_env is None:
                 from rl_mutation.env.env_neat import NeatMutationEnv
-                from stable_baselines3.common.monitor import Monitor
-                from stable_baselines3.common.vec_env import DummyVecEnv
+                self.eval_env = NeatMutationEnv(config)
 
-                # Create base environment
-                base_env = NeatMutationEnv(config)
-                # Wrap it properly for compatibility
-                monitored_env = Monitor(base_env)
-                self.eval_env = DummyVecEnv([lambda: monitored_env])
+            # Set genome in environment
+            self.eval_env.genome = self._copy_genome(genome)
+            self.eval_env.steps = 0
 
-            # Reset env
-            obs = self.eval_env.reset()
-
-            base_env = self.eval_env.envs[0]
-            if hasattr(base_env, 'env'):
-                base_env = base_env.env
-
-            # Inject the genome into the environment WITHOUT evaluating fitness
-            base_env.genome = self._copy_genome(genome)
-            base_env.steps = 0
-
-            # Get observation without fitness evaluation
-            obs = np.array([base_env._get_observation()])
+            # Get observation directly without evaluation
+            obs = self.eval_env._get_observation()
 
             print(f"[RL_MUTATION] Original genome: {len(genome.nodes)} nodes, {len(genome.connections)} connections")
 
-            # Get action from RL policy - SINGLE STEP ONLY
-            actions, _ = self.rl_model.predict(obs, deterministic=True)
+            # Get action from RL policy
+            actions, _ = self.rl_model.predict(np.array([obs]), deterministic=True)
             print(f"[RL_MUTATION] Applying single mutation: action={actions[0]}")
 
-            # Apply mutation without fitness evaluation
-            mutated_genome = self._apply_mutation_only(base_env, actions[0], config)
+            # Apply mutation
+            mutated_genome = self._apply_mutation_only(self.eval_env, actions[0], config)
 
             print(f"[RL_MUTATION] Mutation complete")
             print(f"[RL_MUTATION] Final genome: {len(mutated_genome.nodes)} nodes, {len(mutated_genome.connections)} connections")
@@ -242,7 +227,6 @@ class TTestingReproduction(neat.DefaultReproduction):
             self.logger.error(f"RL mutation failed: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to standard mutation
             return self._apply_standard_mutation(genome, config)
 
     def _apply_mutation_only(self, env, action, config):
