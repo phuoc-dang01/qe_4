@@ -197,26 +197,28 @@ class TTestingReproduction(neat.DefaultReproduction):
         print(f"[RL_MUTATION] Starting RL-guided mutation for genome {genome.key}")
 
         try:
-            # Create environment if needed
-            if self.eval_env is None:
-                from rl_mutation.env.env_neat import NeatMutationEnv
-                self.eval_env = NeatMutationEnv(config)
+            # Create a simple environment without wrappers
+            from rl_mutation.env.env_neat import NeatMutationEnv
+
+            # Create environment directly
+            env = NeatMutationEnv(config)
 
             # Set genome in environment
-            self.eval_env.genome = self._copy_genome(genome)
-            self.eval_env.steps = 0
+            env.genome = self._copy_genome(genome)
+            env.steps = 0
 
-            # Get observation directly without evaluation
-            obs = self.eval_env._get_observation()
+            # Get observation
+            obs = env._get_observation()
 
             print(f"[RL_MUTATION] Original genome: {len(genome.nodes)} nodes, {len(genome.connections)} connections")
 
             # Get action from RL policy
-            actions, _ = self.rl_model.predict(np.array([obs]), deterministic=True)
+            obs_vec = np.array([obs])  # Add batch dimension for model
+            actions, _ = self.rl_model.predict(obs_vec, deterministic=True)
             print(f"[RL_MUTATION] Applying single mutation: action={actions[0]}")
 
-            # Apply mutation
-            mutated_genome = self._apply_mutation_only(self.eval_env, actions[0], config)
+            # Apply mutation directly on env
+            mutated_genome = self._apply_mutation_only(env, actions[0], config)
 
             print(f"[RL_MUTATION] Mutation complete")
             print(f"[RL_MUTATION] Final genome: {len(mutated_genome.nodes)} nodes, {len(mutated_genome.connections)} connections")
@@ -263,7 +265,6 @@ class TTestingReproduction(neat.DefaultReproduction):
                 ng.bias = random.gauss(cfg.bias_init_mean, cfg.bias_init_stdev)
 
         return genome
-
 
     def _apply_standard_mutation(self, genome, config):
         """Apply standard NEAT mutations as fallback."""

@@ -85,7 +85,7 @@ def run_ppo(args, body, env_name, model_save_dir, model_save_name, connections=N
             total_timesteps=args.total_timesteps,
             callback=callback,
             log_interval=args.log_interval,
-            progress_bar=True
+            progress_bar=False
         )
 
         print(f"[PPO] PPO training complete, best reward: {callback.best_reward}")
