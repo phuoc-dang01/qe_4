@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 # Import from project root
-from ppo_evaluation_args import create_ppo_eval_args
+from rl_mutation.evolution.ppo_evaluation_args import create_ppo_eval_args
 from pytorch_neat.cppn import create_cppn
 
 from evogym import get_full_connectivity, has_actuator, hashable, is_connected

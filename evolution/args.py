@@ -8,7 +8,7 @@ def create_evolution_args(
     pop_size: int = 20,
     structure_shape: Tuple[int, int] = (5, 5),
     max_evaluations: int = 100,
-    num_cores: int = 4
+    num_cores: int = 8
 ) -> argparse.Namespace:
     """
     Create a default argument namespace for evolution.

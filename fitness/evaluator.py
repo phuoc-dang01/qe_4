@@ -50,7 +50,7 @@ import torch
 # Now import the function
 from fitness.reward_const import *
 
-from run import run_ppo
+from evolution.ppo_eval import run_ppo
 from evogym.utils import hashable
 from evogym.world import EvoWorld
 

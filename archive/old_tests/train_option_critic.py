@@ -39,7 +39,7 @@ def setup_neat_config(env_name="Walker-v0", structure_shape=(5, 5)):
     config_path = os.path.join(os.path.dirname(__file__), 'neat.cfg')
 
     # Import the PPO evaluation args
-    import ppo_evaluation_args
+    import rl_mutation.evolution.ppo_evaluation_args as ppo_evaluation_args
     ppo_args = ppo_evaluation_args.create_ppo_eval_args()
 
     config = neat.Config(

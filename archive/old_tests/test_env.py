@@ -20,7 +20,7 @@ def setup_neat_config():
     config_path = os.path.join(os.path.dirname(__file__), 'neat.cfg')
 
     # Reuse your existing setup_neat_config function
-    import ppo_evaluation_args
+    import rl_mutation.evolution.ppo_evaluation_args as ppo_evaluation_args
     ppo_args = ppo_evaluation_args.create_ppo_eval_args()
 
     config = neat.Config(
