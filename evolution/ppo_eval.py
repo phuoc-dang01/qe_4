@@ -1,4 +1,4 @@
-# t_run_ppo.py
+# evolution/ppo_eval.py
 import argparse
 import os
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 import torch
 
-import gymnasium as gym  # instead of gym
+import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import configure
@@ -17,18 +17,21 @@ import evogym.envs
 import wandb
 from evogym.envs import *
 
-from .t_callback import TEvalCallback
+from .callbacks import TEvalCallback  # Changed from .t_callback
 
-# In t_run_ppo.py, replace the entire run_ppo function:
 
 def run_ppo(args, body, env_name, model_save_dir, model_save_name, connections=None, seed=42):
     print(f"[DEBUG PPO] Process {os.getpid()} starting run_ppo for {model_save_name}")
 
     try:
+        # The key fix: EvoGym expects 'body' parameter, not 'robot'
         env_kwargs = {
             'body': body,
-            'connections': connections,
         }
+
+        # Add connections only if provided
+        if connections is not None:
+            env_kwargs['connections'] = connections
 
         print(f"[PPO] Creating environment {env_name}...")
         base_env = gym.make(env_name, **env_kwargs)
@@ -67,7 +70,7 @@ def run_ppo(args, body, env_name, model_save_dir, model_save_name, connections=N
         print(f"[DEBUG PPO] PPO model created successfully")
         model.set_logger(sb3_logger)
 
-        # Setup callback
+        # Setup callback - also fix the callback to use correct parameters
         callback = TEvalCallback(
             body=body,
             connections=connections,

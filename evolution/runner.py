@@ -1,22 +1,32 @@
+# evolution/runner.py
 import argparse
 import os
 import pdb
 import shutil
 import sys
 from datetime import datetime
+import multiprocessing as mp
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Define current directory
+curr_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add project paths
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Add evogym paths if it exists as a subdirectory
+evogym_path = PROJECT_ROOT / 'evogym'
+if evogym_path.exists():
+    sys.path.insert(0, str(evogym_path / 'examples'))
+    sys.path.insert(0, str(evogym_path / 'examples' / 'externals' / 'PyTorch-NEAT'))
 
 import neat
 import numpy as np
 import torch
 
-curr_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.join(curr_dir, '..')
-external_dir = os.path.join(root_dir, 'externals')
-sys.path.insert(0, root_dir)
-sys.path.insert(1, os.path.join(external_dir, 'PyTorch-NEAT'))
-
-from typing import Any, Dict, List, Optional, Tuple, Union
-
+# Import from project root
 from ppo_evaluation_args import create_ppo_eval_args
 from pytorch_neat.cppn import create_cppn
 
@@ -24,9 +34,10 @@ from evogym import get_full_connectivity, has_actuator, hashable, is_connected
 from evogym.envs import *
 import evogym.envs
 
-from .t_parallel import ParallelEvaluator
-from .t_population import Population
-from .t_run_ppo import run_ppo
+# Import from local evolution module
+from .parallel import ParallelEvaluator
+from .population import Population
+from .ppo_eval import run_ppo
 
 
 class CPPNRobotGenerator:
@@ -63,26 +74,16 @@ class CPPNRobotGenerator:
         material = np.vstack(material).argmax(axis=0)
         return material.reshape(structure_shape)
 
-def get_cppn_input(structure_shape):
-    x, y = torch.meshgrid(torch.arange(structure_shape[0]),
-                          torch.arange(structure_shape[1]),
-                          indexing="ij"
-                          )
-    x, y = x.flatten(), y.flatten()
-    center = (np.array(structure_shape) - 1) / 2
-    d = ((x - center[0]) ** 2 + (y - center[1]) ** 2).sqrt()
-    return x, y, d
+
+
+# Function to create fresh PPO args
+def get_fresh_ppo_args():
+    return create_ppo_eval_args()
 
 def get_robot_from_genome(genome, config):
-    nodes = create_cppn(genome, config, leaf_names=['x', 'y', 'd'], node_names=['empty', 'rigid', 'soft', 'hori', 'vert'])
-    structure_shape = config.extra_info['structure_shape']
-    x, y, d = get_cppn_input(structure_shape)
-    material = []
-    for node in nodes:
-        material.append(node(x=x, y=y, d=d).numpy())
-    material = np.vstack(material).argmax(axis=0)
-    robot = material.reshape(structure_shape)
-    return robot
+    """Helper function for backward compatibility."""
+    return CPPNRobotGenerator.get_robot_from_genome(genome, config)
+
 
 def eval_genome_constraint(genome, config, genome_id, generation):
     """Check if genome produces valid and unique robot structure."""
@@ -116,6 +117,18 @@ def eval_genome_constraint(genome, config, genome_id, generation):
 
 def eval_fitness(genome, config, genome_id, generation):
     """Evaluate genome fitness using PPO. Assumes genome passed constraint check."""
+
+    # Ensure clean process environment
+    import os
+    if mp.current_process().name != 'MainProcess':
+        # We're in a worker process
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        os.environ['OMP_NUM_THREADS'] = '1'
+        os.environ['MKL_NUM_THREADS'] = '1'
+
+        import torch
+        torch.set_num_threads(1)
+
     process_id = os.getpid()
     print(f"Evaluating genome {genome_id} on process {process_id} for generation {generation}")
 
@@ -124,7 +137,7 @@ def eval_fitness(genome, config, genome_id, generation):
         robot = CPPNRobotGenerator.get_robot_from_genome(genome, config)
         print(f"Robot shape: {robot.shape}")
 
-        # Get configuration
+        # Get configuration - create fresh args for each process
         if 'get_ppo_args' in config.extra_info:
             args = config.extra_info['get_ppo_args']()
         else:
@@ -195,9 +208,27 @@ class SaveResultReporter(neat.BaseReporter):
                 out += f'{genome_id}\t\t{genome.fitness}\n'
             f.write(out)
 
-def run_t(
-    args: argparse.Namespace
+
+def run_evolution(
+    args: argparse.Namespace,
+    use_adaptive: bool = True,
+    transfer_policy: Optional[str] = None,
+    selection_strategy: str = 'epsilon_greedy',
+    exploration_rate: float = 0.3
 ):
+    """
+    Run NEAT evolution with optional adaptive mutation strategies.
+
+    Args:
+        args: Evolution configuration arguments
+        use_adaptive: Whether to use adaptive mutation strategies
+        transfer_policy: Path to saved mutation policy for transfer learning
+        selection_strategy: Mutation selection strategy ('epsilon_greedy', 'softmax', 'ucb')
+        exploration_rate: Initial exploration rate for mutations
+
+    Returns:
+        Tuple of (best_robot, best_fitness, final_population)
+    """
     exp_name, env_name, pop_size, structure_shape, max_evaluations, num_cores = (
         args.exp_name,
         args.env_name,
@@ -208,21 +239,23 @@ def run_t(
     )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    save_path = os.path.join("saved_data",  f"{args.exp_name}_{timestamp}")
+    save_path = os.path.join("saved_data", f"{args.exp_name}_{timestamp}")
     os.makedirs(save_path, exist_ok=True)
 
     save_path_metadata = os.path.join(save_path, 'metadata.txt')
     with open(save_path_metadata, 'w') as f:
-        f.write(f'POP_SIZE: {pop_size}\n' \
-            f'STRUCTURE_SHAPE: {structure_shape[0]} {structure_shape[1]}\n' \
-            f'MAX_EVALUATIONS: {max_evaluations}\n')
+        f.write(f'POP_SIZE: {pop_size}\n'
+                f'STRUCTURE_SHAPE: {structure_shape[0]} {structure_shape[1]}\n'
+                f'MAX_EVALUATIONS: {max_evaluations}\n'
+                f'USE_ADAPTIVE: {use_adaptive}\n'
+                f'SELECTION_STRATEGY: {selection_strategy}\n'
+                f'EXPLORATION_RATE: {exploration_rate}\n')
+        if transfer_policy:
+            f.write(f'TRANSFER_POLICY: {transfer_policy}\n')
 
     structure_hashes = {}
 
     config_path = os.path.join(curr_dir, 'neat.cfg')
-
-    def get_fresh_ppo_args():
-        return create_ppo_eval_args()
 
     config = neat.Config(
         neat.DefaultGenome,
@@ -234,7 +267,8 @@ def run_t(
             'structure_shape': structure_shape,
             'save_path': save_path,
             'structure_hashes': structure_hashes,
-            'args': create_ppo_eval_args(), # args for run_ppo
+            'args': create_ppo_eval_args(),  # args for run_ppo
+            'get_ppo_args': get_fresh_ppo_args,  # Function to create fresh args
             'env_name': env_name,
         },
         custom_config=[
@@ -242,7 +276,15 @@ def run_t(
         ],
     )
 
-    pop = Population(config)
+    # Create population with adaptive mutations
+    pop = Population(config, initial_policy=transfer_policy, use_adaptive=use_adaptive)
+
+    # Configure adaptive reproduction if enabled
+    if use_adaptive and hasattr(pop.reproduction, 'selection_strategy'):
+        pop.reproduction.selection_strategy = selection_strategy
+        pop.reproduction.exploration_rate = exploration_rate
+
+    # Add reporters
     reporters = [
         neat.StatisticsReporter(),
         neat.StdOutReporter(True),
@@ -251,20 +293,29 @@ def run_t(
     for reporter in reporters:
         pop.add_reporter(reporter)
 
-    # evaluator = ParallelEvaluator(num_cores, eval_fitness, eval_genome_constraint, timeout=600)
-    # evaluator = ParallelEvaluator(num_workers=num_cores, fitness_function=eval_fitness, constraint_function=eval_genome_constraint, timeout=600)
+    # Create parallel evaluator
     evaluator = ParallelEvaluator(
-    num_workers=num_cores,
-    fitness_function=eval_fitness,
-    constraint_function=eval_genome_constraint,  # Add this
-    timeout=600
-)
+        num_workers=num_cores,
+        fitness_function=eval_fitness,
+        constraint_function=eval_genome_constraint,
+        timeout=600
+    )
 
+    # Run evolution
     pop.run(
         evaluator.evaluate_fitness,
         evaluator.evaluate_constraint,
-        n=np.ceil(max_evaluations / pop_size))
+        n=int(np.ceil(max_evaluations / pop_size))
+    )
 
+    # Get best robot
     best_robot = get_robot_from_genome(pop.best_genome, config)
     best_fitness = pop.best_genome.fitness
-    return best_robot, best_fitness
+
+    # Save final mutation policy if using adaptive
+    if use_adaptive:
+        policy_path = os.path.join(save_path, 'final_mutation_policy.pkl')
+        pop.save_mutation_policy(policy_path)
+        print(f"\nFinal mutation policy saved to: {policy_path}")
+
+    return best_robot, best_fitness, pop

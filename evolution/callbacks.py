@@ -59,7 +59,11 @@ class TEvalCallback(BaseCallback):
     def _validate_and_save(self) -> None:
         rewards = []
         for _ in range(self.n_evals):
-            env_kwargs = {'body': self.body, 'connections': self.connections}
+            # Use 'body' parameter, not 'robot'
+            env_kwargs = {'body': self.body}
+            if self.connections is not None:
+                env_kwargs['connections'] = self.connections
+
             env = gym.make(self.env_name, **env_kwargs)
             env = Monitor(env)
 
@@ -89,4 +93,3 @@ class TEvalCallback(BaseCallback):
 
         if self.verbose > 0:
             print(out)
-

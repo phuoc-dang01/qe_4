@@ -1,24 +1,40 @@
 import neat
 import numpy as np
-
-from .t_reproduction import TTestingReproduction
+from .reproduction import AdaptiveReproduction
 
 
 class Population(neat.Population):
+    """
+    Extended NEAT population that supports adaptive mutation strategies.
+    """
 
-    def __init__(self, config, rl_policy_path=None):
+    def __init__(self, config, initial_policy=None, use_adaptive=True):
+        """
+        Initialize population with optional adaptive reproduction.
+
+        Args:
+            config: NEAT configuration
+            initial_policy: Path to saved mutation policy for transfer learning
+            use_adaptive: Whether to use adaptive mutations (default: True)
+        """
+        # Initialize base population
         super().__init__(config)
-        self.reproduction = TTestingReproduction(
-            config.reproduction_config,
-            self.reporters,
-            config.stagnation_type(config.stagnation_config, self.reporters),
-            rl_policy_path=rl_policy_path,
+
+        # Replace reproduction with adaptive version if requested
+        if use_adaptive:
+            self.reproduction = AdaptiveReproduction(
+                config.reproduction_config,
+                self.reporters,
+                config.stagnation_type(config.stagnation_config, self.reporters)
             )
+
+            # Load initial policy if provided
+            if initial_policy:
+                self.reproduction.load_policy(initial_policy)
 
     def run(self, fitness_function, constraint_function=None, n=None):
         """
-        Runs NEAT's genetic algorithm for at most n generations.  If n
-        is None, run until solution is found or extinction occurs.
+        Runs NEAT's genetic algorithm for at most n generations.
 
         The user-provided fitness_function must take only two arguments:
             1. The population as a list of (genome id, genome) tuples.
@@ -44,15 +60,20 @@ class Population(neat.Population):
 
             self.reporters.start_generation(self.generation)
 
+            # Handle constraint function if provided
             if constraint_function is not None:
                 genomes = list(self.population.items())
                 validity = constraint_function(genomes, self.config, self.generation)
                 valid_idx = np.where(validity)[0]
                 valid_genomes = np.array(genomes)[valid_idx]
+
+                # Create new genomes if not enough valid ones
                 while len(valid_genomes) < self.config.pop_size:
-                    new_population = self.reproduction.create_new(self.config.genome_type,
-                                                                    self.config.genome_config,
-                                                                    self.config.pop_size - len(valid_genomes))
+                    new_population = self.reproduction.create_new(
+                        self.config.genome_type,
+                        self.config.genome_config,
+                        self.config.pop_size - len(valid_genomes)
+                    )
                     new_genomes = list(new_population.items())
                     validity = constraint_function(new_genomes, self.config, self.generation)
                     valid_idx = np.where(validity)[0]
@@ -61,10 +82,10 @@ class Population(neat.Population):
                 self.population = dict(valid_genomes)
                 self.species.speciate(self.config, self.population, self.generation)
 
-            # Evaluate all genomes using the user-provided function.
+            # Evaluate all genomes using the user-provided function
             fitness_function(list(self.population.items()), self.config, self.generation)
 
-            # Gather and report statistics.
+            # Gather and report statistics
             best = None
             for g in self.population.values():
                 if g.fitness is None:
@@ -72,37 +93,42 @@ class Population(neat.Population):
 
                 if best is None or g.fitness > best.fitness:
                     best = g
+
             self.reporters.post_evaluate(self.config, self.population, self.species, best)
 
-            # Track the best genome ever seen.
+            # Track the best genome ever seen
             if self.best_genome is None or best.fitness > self.best_genome.fitness:
                 self.best_genome = best
 
             if not self.config.no_fitness_termination:
-                # End if the fitness threshold is reached.
+                # End if the fitness threshold is reached
                 fv = self.fitness_criterion(g.fitness for g in self.population.values())
                 if fv >= self.config.fitness_threshold:
                     self.reporters.found_solution(self.config, self.generation, best)
                     break
 
-            # Create the next generation from the current generation.
-            self.population = self.reproduction.reproduce(self.config, self.species,
-                                                          self.config.pop_size, self.generation)
+            # Create the next generation from the current generation
+            self.population = self.reproduction.reproduce(
+                self.config, self.species,
+                self.config.pop_size, self.generation
+            )
 
-            # Check for complete extinction.
+            # Check for complete extinction
             if not self.species.species:
                 self.reporters.complete_extinction()
 
                 # If requested by the user, create a completely new population,
-                # otherwise raise an exception.
+                # otherwise raise an exception
                 if self.config.reset_on_extinction:
-                    self.population = self.reproduction.create_new(self.config.genome_type,
-                                                                   self.config.genome_config,
-                                                                   self.config.pop_size)
+                    self.population = self.reproduction.create_new(
+                        self.config.genome_type,
+                        self.config.genome_config,
+                        self.config.pop_size
+                    )
                 else:
-                    raise CompleteExtinctionException()
+                    raise neat.CompleteExtinctionException()
 
-            # Divide the new population into species.
+            # Divide the new population into species
             self.species.speciate(self.config, self.population, self.generation)
 
             self.reporters.end_generation(self.config, self.population, self.species)
@@ -113,3 +139,16 @@ class Population(neat.Population):
             self.reporters.found_solution(self.config, self.generation, self.best_genome)
 
         return self.best_genome
+
+    def get_mutation_report(self):
+        """Get mutation effectiveness report from adaptive reproduction."""
+        if hasattr(self.reproduction, 'get_mutation_report'):
+            return self.reproduction.get_mutation_report()
+        return "No mutation report available (not using adaptive reproduction)"
+
+    def save_mutation_policy(self, filepath):
+        """Save the learned mutation policy."""
+        if hasattr(self.reproduction, 'save_policy'):
+            self.reproduction.save_policy(filepath)
+        else:
+            raise ValueError("Cannot save policy - not using adaptive reproduction")

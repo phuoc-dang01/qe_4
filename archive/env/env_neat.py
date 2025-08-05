@@ -11,7 +11,7 @@ from neat.genome import DefaultGenome
 class NeatMutationEnv(gym.Env):
     ADD_NODE, DELETE_NODE, ADD_CONNECTION, DELETE_CONNECTION, MODIFY_WEIGHT, MODIFY_BIAS = range(6)
 
-    def __init__(self, config, evaluator_type: str = "full"):
+    def __init__(self, config, evaluator_type: str = "full", reward_function: str = "improvement"):
         """
         Initialize NEAT mutation environment.
 
@@ -23,8 +23,45 @@ class NeatMutationEnv(gym.Env):
                 - "full": Complete robot simulation (requires all dependencies)
         """
         self.config = config
+        self.evaluator_type = evaluator_type
         self._setup_action_spaces()
         self._setup_observation_space()
+        self._initialize_evaluator()
+
+
+    def _initialize_evaluator(self):
+        """Initialize the appropriate evaluator based on type."""
+        if self.evaluator_type == "dummy":
+            from fitness.base_evaluator import DummyEvaluator
+            self.evaluator = DummyEvaluator(self.config)
+        elif self.evaluator_type == "proxy":
+            from fitness.base_evaluator import ProxyEvaluator
+            self.evaluator = ProxyEvaluator(self.config)
+        else:
+            # Full evaluator
+            from fitness.evaluator import FitnessEvaluator
+            self.evaluator = FitnessEvaluator(self.config)
+
+    def _setup_reward_function(self):
+        """Initialize the appropriate reward function."""
+        from fitness.reward_functions import ImprovementReward, NoveltyReward
+
+        if self.reward_function_type == "improvement":
+            self.reward_func = ImprovementReward()
+        elif self.reward_function_type == "novelty":
+            self.reward_func = NoveltyReward()
+        else:
+            # Default to improvement
+            self.reward_func = ImprovementReward()
+
+    def calculate_reward(self, current_fitness, prev_fitness):
+        """Use the configured reward function."""
+        info = {
+            'num_nodes': len(self.genome.nodes),
+            'num_connections': len(self.genome.connections),
+            'step': self.steps
+        }
+        return self.reward_func.calculate_reward(current_fitness, prev_fitness, info)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
